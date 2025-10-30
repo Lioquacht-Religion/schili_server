@@ -1,21 +1,16 @@
 // http_server.rs
 
 use actix_web::{
-    App, HttpResponse, HttpServer, Responder, get,
+    App, HttpServer, Responder, get,
     middleware::Logger,
     post,
     web::{self, ThinData},
 };
 use sqlx::{Pool, Postgres};
-use tokio::sync::Mutex;
 
 use crate::{api, database, repository};
 
 pub async fn start_http_server() -> std::io::Result<()> {
-    let counter = web::Data::new(AppStatWithCounter {
-        counter: Mutex::new(0),
-    });
-
     let pool = database::create_db_pool().await;
 
     HttpServer::new(move || {
@@ -24,20 +19,15 @@ pub async fn start_http_server() -> std::io::Result<()> {
             .app_data(web::Data::new(AppState {
                 app_name: String::from("Schili Sensor Server"),
             }))
-            .app_data(counter.clone())
             .app_data(web::ThinData(pool.clone()))
-            .service(count)
             .service(web::scope("/app").route("/index.html", web::get().to(index)))
-            .service(sensor_add)
-            .service(temperature_add)
+            .service(post_sensor)
+            .service(post_temperature_all)
+            .service(get_sensor_temperatures_all)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
     .await
-}
-
-struct AppStatWithCounter {
-    counter: Mutex<i32>,
 }
 
 struct AppState {
@@ -49,15 +39,8 @@ async fn index(data: web::Data<AppState>) -> String {
     format!("Hello {app_name}!")
 }
 
-#[get("/count")]
-async fn count(data: web::Data<AppStatWithCounter>) -> impl Responder {
-    let mut counter = data.counter.lock().await;
-    *counter += 1;
-    HttpResponse::Ok().body(format!("Request number: {counter}"))
-}
-
 #[post("/sensor/add")]
-async fn sensor_add(
+async fn post_sensor(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
     api_sensor: web::Json<api::Sensor>,
 ) -> actix_web::Result<impl Responder> {
@@ -68,11 +51,11 @@ async fn sensor_add(
         return Err(e.into());
     }
 
-    Ok(format!("added sensor with name: {}", db_sensor.name))
+    Ok(format!("added sensor with name: {}", db_sensor.sensor_name))
 }
 
 #[post("/sensor/temperature/add/all")]
-async fn temperature_add(
+async fn post_temperature_all(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
     api_temp_measures: web::Json<api::SensorTempMeasurements>,
 ) -> actix_web::Result<impl Responder> {
@@ -81,7 +64,7 @@ async fn temperature_add(
     match repository::find_sensor_by_ref(&pool, &sensor_ref).await {
         Ok(sensor) => {
             if let Err(e) =
-                repository::insert_sensor_temperature_measures(&pool, sensor.id, &mut db_temps)
+                repository::insert_sensor_temperature_measures(&pool, sensor.sensor_id, &mut db_temps)
                     .await
             {
                 return Err(e.into());
@@ -91,4 +74,21 @@ async fn temperature_add(
     }
 
     Ok("added sensor temperature measurements.")
+}
+
+#[get("/sensor/temperature/{sensor_reference}")]
+async fn get_sensor_temperatures_all(
+    path: web::Path<(String,)>,
+    ThinData(pool): web::ThinData<Pool<Postgres>>,
+) -> actix_web::Result<impl Responder> {
+    let (sensor_ref,) = &path.into_inner();
+    match repository::find_sensor_by_ref(&pool, &sensor_ref).await {
+        Ok(sensor) => {
+                let temps = repository::find_sensor_temperature_measures(&pool, sensor.sensor_id).await?;
+                let sensor_temps = (sensor_ref.to_owned(), temps); 
+                let api_temps : api::SensorTempMeasurements = sensor_temps.into();
+                Ok(web::Json(api_temps))
+        }
+        Err(e) => Err(e.into()),
+    }
 }

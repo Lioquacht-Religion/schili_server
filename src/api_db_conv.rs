@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::{api, repository};
+use crate::{api::{self, SensorTempMeasurements}, repository};
 
 impl From<&api::SensorType> for repository::SensorType {
     fn from(value: &api::SensorType) -> Self {
@@ -36,5 +36,27 @@ impl From<&api::SensorTempMeasurements> for (String, Vec<repository::Temperature
             })
             .collect();
         (value.sensor_reference.clone(), temps)
+    }
+}
+
+impl From<repository::Temperature> for api::TemperatureMeasurement{
+    fn from(value: repository::Temperature) -> Self {
+        api::TemperatureMeasurement{
+            temp_celsius: value.temp_celsius,
+            measure_time: value.measure_time.and_utc(),
+        }
+    }
+}
+
+impl From<(String, Vec<repository::Temperature>)> for api::SensorTempMeasurements {
+    fn from(value: (String, Vec<repository::Temperature>)) -> Self {
+        let (sensor_ref, temps) = value;
+        let temps: Vec<api::TemperatureMeasurement> = temps
+            .into_iter()
+            .map(|t| {
+                t.into()
+            })
+            .collect();
+        SensorTempMeasurements { sensor_reference: sensor_ref, temp_measurements: temps }
     }
 }

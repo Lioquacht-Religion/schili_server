@@ -20,9 +20,9 @@ pub async fn start_sql_query(
 }
 
 pub struct Sensor {
-    pub id: i32,
-    pub reference: String,
-    pub name: String,
+    pub sensor_id: i32,
+    pub sensor_reference: String,
+    pub sensor_name: String,
     pub sensor_types: HashSet<SensorType>,
 }
 
@@ -35,7 +35,8 @@ pub enum SensorType {
 }
 
 pub struct Temperature {
-    pub id: i32,
+    pub temperature_id: i64,
+    pub sensor_id: i32,
     pub temp_celsius: BigDecimal,
     pub measure_time: NaiveDateTime,
 }
@@ -48,9 +49,9 @@ impl Sensor {
         sensor_types: HashSet<SensorType>,
     ) -> Self {
         Self {
-            id,
-            reference: reference.into(),
-            name: name.into(),
+            sensor_id: id,
+            sensor_reference: reference.into(),
+            sensor_name: name.into(),
             sensor_types,
         }
     }
@@ -74,7 +75,8 @@ impl From<&SensorType> for &str {
 impl Temperature {
     pub fn new(temp_celsius: BigDecimal, measure_time: NaiveDateTime) -> Self {
         Self {
-            id: 0,
+            temperature_id: 0,
+            sensor_id: 0,
             temp_celsius,
             measure_time,
         }
@@ -90,13 +92,13 @@ pub async fn insert_sensor(
            INSERT INTO sensors (sensor_name, sensor_reference) VALUES ($1, $2)
            RETURNING sensor_id
         "#,
-        sensor.name,
-        sensor.reference
+        sensor.sensor_name,
+        sensor.sensor_reference
     )
     .fetch_one(pool)
     .await?;
 
-    sensor.id = sensor_id;
+    sensor.sensor_id = sensor_id;
 
     Ok(())
 }
@@ -132,7 +134,7 @@ pub async fn insert_sensor_with_sensor_types(
     sensor: &mut Sensor,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     insert_sensor(pool, sensor).await?;
-    insert_sensor_types(pool, sensor.id, sensor.sensor_types.iter()).await?;
+    insert_sensor_types(pool, sensor.sensor_id, sensor.sensor_types.iter()).await?;
     Ok(())
 }
 
@@ -189,12 +191,23 @@ pub async fn find_sensor_by_ref(
     }
 }
 
-/*
 pub async fn find_sensor_temperature_measures(
     pool: &PgPool,
     sensor_id: i32,
-    temperatures: &mut Vec<Temperature>,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    Ok(())
+) -> std::result::Result<Vec<Temperature>, Box<dyn std::error::Error>> {
+    match sqlx::query_as!(
+        Temperature,
+        r#"
+        SELECT t.temperature_id, s.sensor_id, t.temp_celsius, t.measure_time
+        FROM sensors s 
+        LEFT JOIN temperatures t ON s.sensor_id = t.sensor_id
+        WHERE s.sensor_id = $1
+    "#,
+    sensor_id
+    )
+        .fetch_all(pool)
+        .await {
+            Ok(temps) => Ok(temps),
+            Err(e) => Err(e.into()),
+        }
 }
-*/
