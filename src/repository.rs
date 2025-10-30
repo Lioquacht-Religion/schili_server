@@ -2,7 +2,8 @@
 
 use std::collections::HashSet;
 
-use sqlx::{PgPool, Pool, Postgres};
+use chrono::NaiveDateTime;
+use sqlx::{PgPool, Pool, Postgres, types::BigDecimal};
 
 pub async fn start_sql_query(
     pool: &Pool<Postgres>,
@@ -33,14 +34,29 @@ pub enum SensorType {
     Co2,
 }
 
+pub struct Temperature {
+    pub id: i32,
+    pub temp_celsius: BigDecimal,
+    pub measure_time: NaiveDateTime,
+}
+
 impl Sensor {
-    pub fn new(reference: &str, name: &str, sensor_types: HashSet<SensorType>) -> Self {
+    pub fn new_with_id(
+        id: i32,
+        reference: &str,
+        name: &str,
+        sensor_types: HashSet<SensorType>,
+    ) -> Self {
         Self {
-            id: 0,
+            id,
             reference: reference.into(),
             name: name.into(),
             sensor_types,
         }
+    }
+
+    pub fn new(reference: &str, name: &str, sensor_types: HashSet<SensorType>) -> Self {
+        Self::new_with_id(0, reference, name, sensor_types)
     }
 }
 
@@ -51,6 +67,16 @@ impl From<&SensorType> for &str {
             SensorType::Humidity => "humidity",
             SensorType::Airpressure => "airpressure",
             SensorType::Co2 => "co2",
+        }
+    }
+}
+
+impl Temperature {
+    pub fn new(temp_celsius: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self {
+            id: 0,
+            temp_celsius,
+            measure_time,
         }
     }
 }
@@ -89,8 +115,8 @@ pub async fn insert_sensor_types(
     sqlx::query!(
         r#"
            INSERT INTO sensor_types_link (sensor_id, sensor_type) 
-           SELECT $1, table_boo.* 
-           FROM UNNEST($2::text[]::sensor_type[]) AS table_boo
+           SELECT $1, sensor_type_arr.* 
+           FROM UNNEST($2::text[]::sensor_type[]) AS sensor_type_arr
         "#,
         sensor_id,
         &sensor_types_str
@@ -109,3 +135,66 @@ pub async fn insert_sensor_with_sensor_types(
     insert_sensor_types(pool, sensor.id, sensor.sensor_types.iter()).await?;
     Ok(())
 }
+
+pub async fn insert_sensor_temperature_measures(
+    pool: &PgPool,
+    sensor_id: i32,
+    temperatures: &mut Vec<Temperature>,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let mut temps: Vec<BigDecimal> = Vec::with_capacity(temperatures.len());
+    let mut times: Vec<chrono::NaiveDateTime> = Vec::with_capacity(temperatures.len());
+    for t in temperatures.iter() {
+        temps.push(t.temp_celsius.clone());
+        times.push(t.measure_time.clone());
+    }
+    sqlx::query!(
+        r#"
+           INSERT INTO temperatures (sensor_id, temp_celsius, measure_time) 
+           SELECT $1, temperature_arr.* 
+           FROM UNNEST($2::numeric(6, 3)[], $3::timestamp[]) AS temperature_arr
+        "#,
+        sensor_id,
+        &temps[..],
+        &times[..]
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn find_sensor_by_ref(
+    pool: &PgPool,
+    sensor_ref: &str,
+) -> std::result::Result<Sensor, Box<dyn std::error::Error>> {
+    match sqlx::query!(
+        r#"
+        SELECT s.sensor_id, s.sensor_name 
+        FROM sensors s 
+        WHERE s.sensor_reference = $1
+    "#,
+        sensor_ref
+    )
+    //TODO: maybe better error handling with anyhow crate?
+    .fetch_one(pool)
+    .await
+    {
+        Ok(rec) => Ok(Sensor::new_with_id(
+            rec.sensor_id,
+            sensor_ref,
+            &rec.sensor_name,
+            HashSet::new(),
+        )),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/*
+pub async fn find_sensor_temperature_measures(
+    pool: &PgPool,
+    sensor_id: i32,
+    temperatures: &mut Vec<Temperature>,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+*/

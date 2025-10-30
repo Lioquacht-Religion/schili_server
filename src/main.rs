@@ -2,7 +2,10 @@ use std::collections::HashSet;
 
 use log::info;
 use sensor_data_server::{
-    api, database, http_server::start_http_server, mqtt_handler::start_mq_client, repository::{self, start_sql_query, Sensor}
+    api, database,
+    http_server::start_http_server,
+    mqtt_handler::start_mq_client,
+    repository::start_sql_query,
 };
 
 #[actix_web::main]
@@ -15,6 +18,7 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("Executing start sql failed.");
 
+    /*
     let mut sensor = Sensor {
         id: 0,
         name: "test_sensor1".into(),
@@ -22,7 +26,6 @@ async fn main() -> std::io::Result<()> {
         sensor_types: HashSet::new(),
     };
 
-    /*
     repository::insert_sensor_with_sensor_types(&pool, &mut sensor)
         .await
         .expect("Insert sensor enitty failed.");

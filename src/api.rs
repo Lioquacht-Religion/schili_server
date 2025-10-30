@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use bigdecimal::BigDecimal;
 use chrono::{Utc, serde::ts_seconds};
 use serde::{Deserialize, Serialize};
 
@@ -21,9 +22,14 @@ pub enum SensorType {
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct PostTemperature {
+pub struct SensorTempMeasurements {
     pub sensor_reference: String,
-    pub temp_celsius: f32,
+    pub temp_measurements: Vec<TemperatureMeasurement>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct TemperatureMeasurement {
+    pub temp_celsius: BigDecimal,
     #[serde(with = "ts_seconds")]
     pub measure_time: chrono::DateTime<Utc>,
 }
