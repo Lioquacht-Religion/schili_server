@@ -8,7 +8,9 @@ use actix_web::{
 };
 use sqlx::{Pool, Postgres};
 
-use crate::{api, database, repository};
+use schili_api::api;
+
+use crate::{api_db_conv::ModelInto, database, repository};
 
 pub async fn start_http_server() -> std::io::Result<()> {
     let pool = database::create_db_pool().await;
@@ -46,7 +48,7 @@ async fn post_sensor(
 ) -> actix_web::Result<impl Responder> {
     //TODO: db error handling, unique indexes,
     // check if sensor with referenc already exists
-    let mut db_sensor: repository::Sensor = (&*api_sensor).into();
+    let mut db_sensor: repository::Sensor = (&*api_sensor).model_into();
     if let Err(e) = repository::insert_sensor_with_sensor_types(&pool, &mut db_sensor).await {
         return Err(e.into());
     }
@@ -59,8 +61,7 @@ async fn post_temperature_all(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
     api_temp_measures: web::Json<api::SensorTempMeasurements>,
 ) -> actix_web::Result<impl Responder> {
-    let (sensor_ref, mut db_temps): (String, Vec<repository::Temperature>) =
-        (&*api_temp_measures).into();
+    let (sensor_ref, mut db_temps): (String, Vec<repository::Temperature>) = (&*api_temp_measures).model_into();
     match repository::find_sensor_by_ref(&pool, &sensor_ref).await {
         Ok(sensor) => {
             if let Err(e) =
@@ -86,7 +87,7 @@ async fn get_sensor_temperatures_all(
         Ok(sensor) => {
                 let temps = repository::find_sensor_temperature_measures(&pool, sensor.sensor_id).await?;
                 let sensor_temps = (sensor_ref.to_owned(), temps); 
-                let api_temps : api::SensorTempMeasurements = sensor_temps.into();
+                let api_temps : api::SensorTempMeasurements = sensor_temps.model_into();
                 Ok(web::Json(api_temps))
         }
         Err(e) => Err(e.into()),

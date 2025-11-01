@@ -1769,6 +1769,12 @@ dependencies = [
 [[package]]
 name = "schili_api"
 version = "0.1.0"
+dependencies = [
+ "bigdecimal",
+ "chrono",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "scopeguard"

@@ -2,10 +2,32 @@
 
 use std::collections::HashSet;
 
-use crate::{api::{self, SensorTempMeasurements}, repository};
+use schili_api::api::{self, SensorTempMeasurements};
 
-impl From<&api::SensorType> for repository::SensorType {
-    fn from(value: &api::SensorType) -> Self {
+use crate::repository;
+
+pub trait ModelFrom<T> : Sized{
+    fn model_from(value : T) -> Self;
+}
+
+pub trait ModelInto<T> : Sized {
+    fn model_into(self) -> T;
+}
+
+impl<T, U: ModelFrom<T>> ModelInto<U> for T{
+    fn model_into(self) -> U {
+        U::model_from(self)
+    }
+}
+
+impl<T> ModelFrom<T> for T{
+    fn model_from(value : T) -> Self {
+        value
+    }
+}
+
+impl ModelFrom<&api::SensorType> for repository::SensorType {
+    fn model_from(value : &api::SensorType) -> Self {
         match value {
             api::SensorType::Temperature => repository::SensorType::Temperature,
             api::SensorType::Humidity => repository::SensorType::Humidity,
@@ -15,16 +37,19 @@ impl From<&api::SensorType> for repository::SensorType {
     }
 }
 
-impl From<&api::Sensor> for repository::Sensor {
-    fn from(value: &api::Sensor) -> Self {
+impl ModelFrom<&api::Sensor> for repository::Sensor {
+    fn model_from(value: &api::Sensor) -> Self {
         let sensor_types: HashSet<repository::SensorType> =
-            value.sensor_types.iter().map(|st| st.into()).collect();
+            value.sensor_types.iter().map(|st| 
+                st.model_into()
+            )
+            .collect();
         repository::Sensor::new(&value.reference, &value.name, sensor_types)
     }
 }
 
-impl From<&api::SensorTempMeasurements> for (String, Vec<repository::Temperature>) {
-    fn from(value: &api::SensorTempMeasurements) -> Self {
+impl ModelFrom<&api::SensorTempMeasurements> for (String, Vec<repository::Temperature>) {
+    fn model_from(value: &api::SensorTempMeasurements) -> Self {
         let temps: Vec<repository::Temperature> = value
             .temp_measurements
             .iter()
@@ -39,8 +64,8 @@ impl From<&api::SensorTempMeasurements> for (String, Vec<repository::Temperature
     }
 }
 
-impl From<repository::Temperature> for api::TemperatureMeasurement{
-    fn from(value: repository::Temperature) -> Self {
+impl ModelFrom<repository::Temperature> for api::TemperatureMeasurement{
+    fn model_from(value: repository::Temperature) -> Self {
         api::TemperatureMeasurement{
             temp_celsius: value.temp_celsius,
             measure_time: value.measure_time.and_utc(),
@@ -48,13 +73,13 @@ impl From<repository::Temperature> for api::TemperatureMeasurement{
     }
 }
 
-impl From<(String, Vec<repository::Temperature>)> for api::SensorTempMeasurements {
-    fn from(value: (String, Vec<repository::Temperature>)) -> Self {
+impl ModelFrom<(String, Vec<repository::Temperature>)> for api::SensorTempMeasurements {
+    fn model_from(value: (String, Vec<repository::Temperature>)) -> Self {
         let (sensor_ref, temps) = value;
         let temps: Vec<api::TemperatureMeasurement> = temps
             .into_iter()
             .map(|t| {
-                t.into()
+                t.model_into()
             })
             .collect();
         SensorTempMeasurements { sensor_reference: sensor_ref, temp_measurements: temps }

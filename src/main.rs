@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use log::info;
 use sensor_data_server::{
-    api, database,
+    database,
     http_server::start_http_server,
     mqtt_handler::start_mq_client,
     repository::start_sql_query,
@@ -31,7 +31,7 @@ async fn main() -> std::io::Result<()> {
         .expect("Insert sensor enitty failed.");
     */
 
-    let sensor = api::Sensor {
+    let sensor = schili_api::api::Sensor {
         name: "test_sensor1".into(),
         reference: "100000".into(),
         sensor_types: HashSet::new(),
