@@ -2,10 +2,12 @@
 
 use std::time::Duration;
 
-use log::info;
-use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
+use log::{error, info};
+use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS};
 use schili_api::mq_topics::{chip_temperature_topic, sensor_temperature_topic};
-use tokio::time;
+use sqlx::{Pool, Postgres};
+
+use crate::{database, service};
 
 static UUID: &str = "42";
 
@@ -15,75 +17,73 @@ pub async fn start_mq_client() {
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
 
+    let pool = database::create_db_pool().await;
+
     let _handle = actix_rt::spawn(async move {
-        client
-            .subscribe(format!("{UUID}/hello/rumqtt"), QoS::AtMostOnce)
-            .await
-            .unwrap();
-
-        client
-            .subscribe(format!("{UUID}/hello"), QoS::AtMostOnce)
-            .await
-            .unwrap();
-        client
-            .subscribe(chip_temperature_topic(UUID), QoS::AtMostOnce)
-            .await
-            .unwrap();
-        client
-            .subscribe(sensor_temperature_topic(UUID), QoS::AtMostOnce)
-            .await
-            .unwrap();
-
-        for i in 0..10 {
-            client
-                .publish(
-                    format!("{UUID}/hello/rumqtt"),
-                    QoS::AtLeastOnce,
-                    false,
-                    vec![i; i as usize],
-                )
-                .await
-                .unwrap();
-            time::sleep(Duration::from_millis(1000)).await;
-
-            println!("publish");
-            info!("publish");
-        }
-        time::sleep(Duration::from_secs(10)).await;
+        subscribe_to_topics(&client).await;
+        handle_mq_events(&mut eventloop, &pool).await;
     });
+}
 
-    let _handle2 = actix_rt::spawn(async move {
-        loop {
-            let event = eventloop.poll().await;
-            match event {
-                Ok(notification) => {
-                    info!("Received = {:?}", notification);
-                    let publish = if let Event::Incoming(Packet::Publish(publish)) = notification {
-                        publish
-                    } else {
-                        continue;
-                    };
+async fn subscribe_to_topics(client: &AsyncClient) {
+    client
+        .subscribe(chip_temperature_topic(UUID), QoS::AtMostOnce)
+        .await
+        .unwrap();
+    client
+        .subscribe(sensor_temperature_topic(UUID), QoS::AtMostOnce)
+        .await
+        .unwrap();
+}
 
-                    if publish.topic.contains(&chip_temperature_topic(UUID)) {
-                        let temp_bytes_arr: [u8; 4] =
-                            publish.payload[0..4].try_into().expect("4 bytes length");
-                        let temp: f32 = f32::from_be_bytes(temp_bytes_arr);
-                        info!("chip temperature received: {:?}", temp);
-                    }
-                    if publish.topic.contains(&sensor_temperature_topic(UUID)) {
-                        let temp_bytes_arr: [u8; 4] =
-                            publish.payload[0..4].try_into().expect("4 bytes length");
-                        let temp: f32 = f32::from_be_bytes(temp_bytes_arr);
-                        info!("sensor temperature received: {:?}", temp);
-                    }
+async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
+    loop {
+        let event = eventloop.poll().await;
+        match event {
+            Ok(notification) => {
+                info!("Received = {:?}", notification);
+                let publish = if let Event::Incoming(Packet::Publish(publish)) = notification {
+                    publish
+                } else {
+                    continue;
+                };
 
-                    info!("publish received: {:?}", publish);
-                }
-                Err(e) => {
-                    println!("Received = {:?}", e);
-                    log::error!("Error received = {:?}", e);
-                }
+                handle_publish(db_pool, &publish).await;
+            }
+            Err(e) => {
+                println!("Received = {:?}", e);
+                log::error!("Error received = {:?}", e);
             }
         }
-    });
+    }
+}
+
+async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) {
+    if publish.topic.contains(&chip_temperature_topic(UUID)) {
+        let temp = extract_temperature(publish);
+        info!("chip temperature received: {:?}", temp);
+    }
+    if publish.topic.contains(&sensor_temperature_topic(UUID)) {
+        let sens_temps = extract_sensor_temperatures(&publish);
+        if let Err(e) = service::insert_temperatures_all(pool, &sens_temps)
+            .await {
+                error!("Could not insert temperatures from mq publish. error: {}", e);
+        }
+
+        info!(
+            "sensor temps: {}",
+            serde_json::to_string(&sens_temps).unwrap()
+        );
+    }
+}
+
+fn extract_sensor_temperatures(publish: &Publish) -> schili_api::api::SensorTempMeasurements {
+    let json_str: String = String::from_utf8(publish.payload.to_vec()).unwrap();
+    serde_json::from_str(&json_str).unwrap()
+}
+
+fn extract_temperature(publish: &Publish) -> f32 {
+    let temp_bytes_arr: [u8; 4] = publish.payload[0..4].try_into().expect("4 bytes length");
+    let temp: f32 = f32::from_be_bytes(temp_bytes_arr);
+    temp
 }

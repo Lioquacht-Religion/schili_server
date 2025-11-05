@@ -6,4 +6,6 @@ pub mod mqtt_handler;
 
 pub mod api_db_conv;
 pub mod database;
+pub mod error;
 pub mod repository;
+pub mod service;

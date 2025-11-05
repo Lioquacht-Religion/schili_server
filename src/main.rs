@@ -2,9 +2,7 @@ use std::collections::HashSet;
 
 use log::info;
 use sensor_data_server::{
-    database,
-    http_server::start_http_server,
-    mqtt_handler::start_mq_client,
+    database, http_server::start_http_server, mqtt_handler::start_mq_client,
     repository::start_sql_query,
 };
 

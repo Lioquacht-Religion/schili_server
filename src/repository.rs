@@ -203,11 +203,12 @@ pub async fn find_sensor_temperature_measures(
         LEFT JOIN temperatures t ON s.sensor_id = t.sensor_id
         WHERE s.sensor_id = $1
     "#,
-    sensor_id
+        sensor_id
     )
-        .fetch_all(pool)
-        .await {
-            Ok(temps) => Ok(temps),
-            Err(e) => Err(e.into()),
-        }
+    .fetch_all(pool)
+    .await
+    {
+        Ok(temps) => Ok(temps),
+        Err(e) => Err(e.into()),
+    }
 }
