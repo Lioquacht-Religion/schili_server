@@ -1,1 +1,4 @@
 // example server configuration file
+
+[database]
+connection_string = "postgres://user:password@localhost/database_name"

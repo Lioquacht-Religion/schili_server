@@ -64,11 +64,60 @@ impl ModelFrom<&api::SensorTempMeasurements> for (String, Vec<repository::Temper
     }
 }
 
+impl ModelFrom<&api::SensorSingleTempMeasure> for (String, repository::Temperature) {
+    fn model_from(value: &api::SensorSingleTempMeasure) -> Self {
+        let temp: repository::Temperature = (&value.temp_measure).model_into();
+        (value.sensor_reference.clone(), temp)
+    }
+}
+
 impl ModelFrom<repository::Temperature> for api::TemperatureMeasurement {
     fn model_from(value: repository::Temperature) -> Self {
         api::TemperatureMeasurement {
             temp_celsius: value.temp_celsius,
             measure_time: value.measure_time.and_utc(),
+        }
+    }
+}
+
+impl ModelFrom<&api::TemperatureMeasurement> for repository::Temperature {
+    fn model_from(value: &api::TemperatureMeasurement) -> Self {
+        repository::Temperature{
+            temperature_id: -1,
+            sensor_id: -1,
+            temp_celsius: value.temp_celsius.clone(),
+            measure_time: value.measure_time.naive_utc(),
+        }
+    }
+}
+
+impl ModelFrom<&api::SensorSingleCo2Measure> for (String, repository::Co2) {
+    fn model_from(value: &api::SensorSingleCo2Measure) -> Self {
+        let co2: repository::Co2 = (&value.co2_measure).model_into();
+        (value.sensor_reference.clone(), co2)
+    }
+}
+
+impl ModelFrom<repository::Co2> for api::Co2Measurement {
+    fn model_from(value: repository::Co2) -> Self {
+        api::Co2Measurement{
+            co2_ppm: value.co2_ppm,
+            res0: value.res0,
+            adc_val: value.adc_val_12bit,
+            measure_time: value.measure_time.and_utc(),
+        }
+    }
+}
+
+impl ModelFrom<&api::Co2Measurement> for repository::Co2 {
+    fn model_from(value: &api::Co2Measurement) -> Self {
+        repository::Co2{
+            co2_id: -1,
+            sensor_id: -1,
+            co2_ppm: value.co2_ppm.clone(),
+            res0: value.res0.clone(),
+            adc_val_12bit: value.adc_val,
+            measure_time: value.measure_time.naive_utc(),
         }
     }
 }

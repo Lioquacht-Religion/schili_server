@@ -41,6 +41,15 @@ pub struct Temperature {
     pub measure_time: NaiveDateTime,
 }
 
+pub struct Co2{
+    pub co2_id: i64,
+    pub sensor_id: i32,
+    pub co2_ppm: BigDecimal,
+    pub res0: BigDecimal,
+    pub adc_val_12bit: i32,
+    pub measure_time: NaiveDateTime,
+}
+
 impl Sensor {
     pub fn new_with_id(
         id: i32,
@@ -161,6 +170,54 @@ pub async fn insert_sensor_temperature_measures(
     )
     .execute(pool)
     .await?;
+
+    Ok(())
+}
+
+pub async fn insert_single_sensor_temperature(
+    pool: &PgPool,
+    sensor_id: i32,
+    temperature: &mut Temperature,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let temperature_id = sqlx::query!(
+        r#"
+           INSERT INTO temperatures (sensor_id, temp_celsius, measure_time) 
+           VALUES ($1, $2, $3)
+           RETURNING temperature_id
+        "#,
+        sensor_id,
+        &temperature.temp_celsius,
+        &temperature.measure_time
+    )
+    .fetch_one(pool)
+    .await?;
+
+    temperature.temperature_id = temperature_id.temperature_id;
+
+    Ok(())
+} 
+
+pub async fn insert_single_sensor_co2_measure(
+    pool: &PgPool,
+    sensor_id: i32,
+    co2: &mut Co2,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let co2_id = sqlx::query!(
+        r#"
+           INSERT INTO co2 (sensor_id, co2_ppm, res0, adc_val_12bit, measure_time) 
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING co2_id
+        "#,
+        sensor_id,
+        &co2.co2_ppm,
+        &co2.res0,
+        &co2.adc_val_12bit,
+        &co2.measure_time
+    )
+    .fetch_one(pool)
+    .await?;
+
+    co2.co2_id = co2_id.co2_id;
 
     Ok(())
 }

@@ -2,9 +2,10 @@
 
 use std::time::Duration;
 
+use chrono::Utc;
 use log::{error, info};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS};
-use schili_api::mq_topics::{chip_temperature_topic, sensor_temperature_topic};
+use schili_api::mq_topics::{chip_temperature_topic, sensor_co2_topic, sensor_temperature_topic};
 use sqlx::{Pool, Postgres};
 
 use crate::{database, service};
@@ -12,7 +13,9 @@ use crate::{database, service};
 static UUID: &str = "42";
 
 pub async fn start_mq_client() {
-    let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
+    //TODO: extract into config
+    let mut mqttoptions = MqttOptions::new("schili_server", "192.168.2.212", 1883);
+    mqttoptions.set_credentials("schili_server", "oBaMn4");
     mqttoptions.set_keep_alive(Duration::from_secs(5));
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
@@ -34,6 +37,11 @@ async fn subscribe_to_topics(client: &AsyncClient) {
         .subscribe(sensor_temperature_topic(UUID), QoS::AtMostOnce)
         .await
         .unwrap();
+    client
+        .subscribe(sensor_co2_topic(UUID), QoS::AtMostOnce)
+        .await
+        .unwrap();
+
 }
 
 async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
@@ -64,8 +72,9 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) {
         info!("chip temperature received: {:?}", temp);
     }
     if publish.topic.contains(&sensor_temperature_topic(UUID)) {
-        let sens_temps = extract_sensor_temperatures(&publish);
-        if let Err(e) = service::insert_temperatures_all(pool, &sens_temps)
+        let mut sens_temps = extract_sensor_temperature(&publish);
+        sens_temps.temp_measure.measure_time = Utc::now();
+        if let Err(e) = service::insert_temperature(pool, &sens_temps)
             .await {
                 error!("Could not insert temperatures from mq publish. error: {}", e);
         }
@@ -75,9 +84,29 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) {
             serde_json::to_string(&sens_temps).unwrap()
         );
     }
+    if publish.topic.contains(&sensor_co2_topic(UUID)) {
+        let mut sens_co2 = extract_sensor_co2(&publish);
+        sens_co2.co2_measure.measure_time = Utc::now();
+        if let Err(e) = service::insert_co2(pool, &sens_co2)
+            .await {
+                error!("Could not insert co2 from mq publish. error: {}", e);
+        }
+
+        info!(
+            "sensor temps: {}",
+            serde_json::to_string(&sens_co2).unwrap()
+        );
+    }
+
 }
 
-fn extract_sensor_temperatures(publish: &Publish) -> schili_api::api::SensorTempMeasurements {
+//TODO: error handling
+fn extract_sensor_temperature(publish: &Publish) -> schili_api::api::SensorSingleTempMeasure {
+    let json_str: String = String::from_utf8(publish.payload.to_vec()).unwrap();
+    serde_json::from_str(&json_str).unwrap()
+}
+
+fn extract_sensor_co2(publish: &Publish) -> schili_api::api::SensorSingleCo2Measure{
     let json_str: String = String::from_utf8(publish.payload.to_vec()).unwrap();
     serde_json::from_str(&json_str).unwrap()
 }

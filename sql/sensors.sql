@@ -46,8 +46,9 @@ CREATE TABLE co2 (
 	GENERATED ALWAYS AS IDENTITY,
 	sensor_id integer 
 	REFERENCES sensors (sensor_id) NOT NULL,
-	--TODO: add unit
-	co2_unit numeric(6, 3) NOT NULL,
+	co2_ppm numeric(9, 3) NOT NULL,
+	res0 numeric(15, 5) NOT NULL,
+	adc_val_12bit integer NOT NULL,
 	measure_time timestamp NOT NULL
 );
 
