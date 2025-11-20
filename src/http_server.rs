@@ -1,14 +1,17 @@
 // http_server.rs
 
+use std::char::from_u32;
+
 use actix_web::{
     App, HttpServer, Responder, get,
     middleware::Logger,
     post,
     web::{self, ThinData},
 };
+use chrono::Utc;
 use sqlx::{Pool, Postgres};
 
-use schili_api::api;
+use schili_api::api::{self, GetSensorTempMeasuresRange};
 
 use crate::{database, error::ApiError, service};
 
@@ -26,6 +29,7 @@ pub async fn start_http_server() -> std::io::Result<()> {
             .service(post_sensor)
             .service(post_temperature_all)
             .service(get_sensor_temperatures_all)
+            .service(get_sensor_temperatures_range)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
@@ -68,12 +72,31 @@ async fn post_temperature_all(
 }
 
 #[get("/sensor/temperature/{sensor_reference}")]
+#[deprecated]
 async fn get_sensor_temperatures_all(
     path: web::Path<(String,)>,
     ThinData(pool): web::ThinData<Pool<Postgres>>,
 ) -> actix_web::Result<impl Responder, ApiError> {
     let (sensor_ref,) = &path.into_inner();
     match service::get_sensor_temperatures_all(&pool, sensor_ref.to_owned()).await {
+        Ok(api_temps) => Ok(web::Json(api_temps)),
+        Err(e) => Err(ApiError::from(e)),
+    }
+}
+
+#[get("/sensor/temperature/range/{sensor_reference}/{start_datetime}/{end_datetime}")]
+async fn get_sensor_temperatures_range(
+    path: web::Path<(String, i64, i64)>,
+    ThinData(pool): web::ThinData<Pool<Postgres>>,
+) -> actix_web::Result<impl Responder, ApiError> {
+    let (sensor_ref, start, end) = path.into_inner();
+    let temp_range = GetSensorTempMeasuresRange{
+        sensor_reference: sensor_ref,
+        start_datetime: chrono::DateTime::from_timestamp(start, 0).unwrap(),
+        end_datetime: chrono::DateTime::from_timestamp(end, 0).unwrap(),
+    };
+    match service::get_sensor_temperatures_in_range(
+        &pool, &temp_range).await {
         Ok(api_temps) => Ok(web::Json(api_temps)),
         Err(e) => Err(ApiError::from(e)),
     }

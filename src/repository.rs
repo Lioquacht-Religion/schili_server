@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use sqlx::{PgPool, Pool, Postgres, types::BigDecimal};
 
 pub async fn start_sql_query(
@@ -248,6 +248,7 @@ pub async fn find_sensor_by_ref(
     }
 }
 
+#[deprecated]
 pub async fn find_sensor_temperature_measures(
     pool: &PgPool,
     sensor_id: i32,
@@ -261,6 +262,33 @@ pub async fn find_sensor_temperature_measures(
         WHERE s.sensor_id = $1
     "#,
         sensor_id
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(temps) => Ok(temps),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub async fn find_sensor_temperature_measures_by_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>
+) -> std::result::Result<Vec<Temperature>, Box<dyn std::error::Error>> {
+    match sqlx::query_as!(
+        Temperature,
+        r#"
+        SELECT t.temperature_id, s.sensor_id, t.temp_celsius, t.measure_time
+        FROM sensors s 
+        LEFT JOIN temperatures t ON s.sensor_id = t.sensor_id
+        WHERE s.sensor_id = $1
+        AND $2 <= t.measure_time AND t.measure_time <= $3
+    "#,
+        sensor_id,
+        start_datetime.naive_utc(),
+        end_datetime.naive_utc()
     )
     .fetch_all(pool)
     .await

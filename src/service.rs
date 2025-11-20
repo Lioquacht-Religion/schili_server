@@ -1,7 +1,7 @@
 // service.rs
 
 use anyhow::anyhow;
-use schili_api::api;
+use schili_api::api::{self, GetSensorTempMeasuresRange};
 use sqlx::{Pool, Postgres};
 
 use crate::{api_db_conv::ModelInto, repository};
@@ -64,6 +64,7 @@ pub async fn insert_temperatures_all(
     Ok(())
 }
 
+#[deprecated]
 pub async fn get_sensor_temperatures_all(
     pool: &Pool<Postgres>,
     sensor_ref: String,
@@ -85,6 +86,40 @@ pub async fn get_sensor_temperatures_all(
             )
         })?;
     let sensor_temps = (sensor_ref.to_owned(), temps);
+    let api_temps: api::SensorTempMeasurements = sensor_temps.model_into();
+    Ok(api_temps)
+}
+
+pub async fn get_sensor_temperatures_in_range(
+    pool: &Pool<Postgres>,
+    sensor_temp_range: &GetSensorTempMeasuresRange,
+) -> anyhow::Result<api::SensorTempMeasurements> {
+    let sensor = repository::find_sensor_by_ref(
+        &pool, &sensor_temp_range.sensor_reference)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Sensor with reference='{}' could not be found.",
+                &sensor_temp_range.sensor_reference,
+            )
+        })?;
+    let temps = 
+        repository::find_sensor_temperature_measures_by_timerange(
+            &pool, 
+            sensor.sensor_id, 
+            &sensor_temp_range.start_datetime,
+            &sensor_temp_range.end_datetime
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Error fetching temperature measurements for sensor with reference='{}'.",
+                &sensor_temp_range.sensor_reference
+            )
+        })?;
+    let sensor_temps = (
+        sensor_temp_range.sensor_reference.to_owned(), 
+        temps);
     let api_temps: api::SensorTempMeasurements = sensor_temps.model_into();
     Ok(api_temps)
 }
