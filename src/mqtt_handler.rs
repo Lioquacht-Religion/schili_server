@@ -8,14 +8,20 @@ use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS};
 use schili_api::mq_topics::{chip_temperature_topic, sensor_co2_topic, sensor_temperature_topic};
 use sqlx::{Pool, Postgres};
 
-use crate::{database, service};
+use crate::{config::Config, database, service};
 
 static UUID: &str = "42";
 
-pub async fn start_mq_client() {
-    //TODO: extract into config
-    let mut mqttoptions = MqttOptions::new("schili_server", "192.168.2.212", 1883);
-    mqttoptions.set_credentials("schili_server", "oBaMn4");
+pub async fn start_mq_client(app_config: &Config) {
+    let mut mqttoptions = MqttOptions::new(
+        &app_config.mqtt.broker_id, 
+        &app_config.mqtt.host, 
+        app_config.mqtt.port
+    );
+    mqttoptions.set_credentials(
+        &app_config.mqtt.username, 
+        &app_config.mqtt.passw
+    );
     mqttoptions.set_keep_alive(Duration::from_secs(5));
 
     let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);

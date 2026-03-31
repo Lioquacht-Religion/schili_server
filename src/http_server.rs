@@ -1,14 +1,11 @@
 // http_server.rs
 
-use std::char::from_u32;
-
 use actix_web::{
     App, HttpServer, Responder, get,
     middleware::Logger,
     post,
     web::{self, ThinData},
 };
-use chrono::Utc;
 use sqlx::{Pool, Postgres};
 
 use schili_api::api::{self, GetSensorTempMeasuresRange};

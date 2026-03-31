@@ -1,4 +1,12 @@
-// example server configuration file
+# example server configuration file
 
 [database]
 connection_string = "postgres://user:password@localhost/database_name"
+
+[mqtt]
+broker_id = "broker_name"
+host = "host_name"
+port = 1883
+username = "client_name"
+passw = "password"
+

@@ -2,8 +2,7 @@ use std::collections::HashSet;
 
 use log::info;
 use sensor_data_server::{
-    database, http_server::start_http_server, mqtt_handler::start_mq_client,
-    repository::start_sql_query,
+    config, database, http_server::start_http_server, mqtt_handler::start_mq_client, repository::start_sql_query
 };
 
 #[actix_web::main]
@@ -38,7 +37,8 @@ async fn main() -> std::io::Result<()> {
     let sensor_json = serde_json::to_string(&sensor).unwrap();
     info!("sensor json: {}", sensor_json);
 
-    start_mq_client().await;
+    let config = config::get_config().await;
+    start_mq_client(config).await;
 
     start_http_server().await
 }
