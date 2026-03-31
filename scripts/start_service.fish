@@ -1,7 +1,7 @@
 function kill_process
 	pkill -f -u $USER $argv
 	if test $status -eq 0; then
-		echo "Successfully shutdown old running service ${argv}.'"
+		echo "Successfully shutdown old running service $argv.'"
 	else if test $status -eq 1; then
 		echo 'Could not find or shutdown old running service ${argv}.'
 	else
