@@ -10,13 +10,16 @@ function kill_process
 end
 
 kill_process 'sensor_data_server'
+
 echo 'Enabling posgreql service.'
 sudo systemctl enable postgresql.service
+set -gx DATABASE_URL "postgres://user:password@localhost/schili_sensor_db" 
+
 kill -0 'mosquitto'
 if test $status -eq 0; then
 	echo 'Mosquitto mqtt broker already running.'
 else 
 	echo 'Starting mosquitto mqtt broker.'
-        mosquitto -c mosquitto.conf
+        mosquitto -c mosquitto.conf &
 end
 ./dist/sensor_data_server &
