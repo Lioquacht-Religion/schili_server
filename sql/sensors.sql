@@ -1,5 +1,5 @@
 
-CREATE TYPE sensor_type AS ENUM ('temperature', 'humidity', 'airpressure', 'co2');
+CREATE TYPE sensor_type AS ENUM ('chip', 'temperature', 'humidity', 'airpressure', 'co2');
 
 CREATE TABLE sensors(
 	sensor_id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
@@ -12,6 +12,15 @@ CREATE TABLE sensor_types_link (
 	sensor_id integer 
 	REFERENCES sensors (sensor_id) ON DELETE CASCADE NOT NULL,
 	sensor_type sensor_type NOT NULL
+);
+
+CREATE TABLE chip_temperatures (
+	chip_temperature_id bigint PRIMARY KEY
+	GENERATED ALWAYS AS IDENTITY,
+	sensor_id integer 
+	REFERENCES sensors (sensor_id) NOT NULL,
+	temp_celsius numeric(6, 3) NOT NULL,
+	measure_time timestamp NOT NULL
 );
 
 CREATE TABLE temperatures (

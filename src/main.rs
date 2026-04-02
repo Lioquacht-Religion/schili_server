@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use log::info;
 use sensor_data_server::{
-    config, database, http_server::start_http_server, mqtt_handler::start_mq_client, repository::start_sql_query
+    config, database, http_server::start_http_server, mqtt_handler::start_mq_client,
+    repository::start_sql_query,
 };
 
 #[actix_web::main]

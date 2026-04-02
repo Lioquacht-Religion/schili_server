@@ -6,11 +6,16 @@ use actix_web::{
     post,
     web::{self, ThinData},
 };
+use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
 
-use schili_api::api::{self, GetSensorTempMeasuresRange};
+use schili_api::api::{self, GetSensorSimpleMeasuresRange};
 
-use crate::{database, error::ApiError, service};
+use crate::{
+    database,
+    error::{ApiError, DateRangeError},
+    service,
+};
 
 pub async fn start_http_server() -> std::io::Result<()> {
     let pool = database::create_db_pool().await;
@@ -60,10 +65,21 @@ async fn post_sensor(
 #[post("/sensor/temperature/add/all")]
 async fn post_temperature_all(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
-    api_temp_measures: web::Json<api::SensorTempMeasurements>,
+    api_temp_measures: web::Json<api::SensorSimpleMeasurements>,
 ) -> actix_web::Result<impl Responder, ApiError> {
     match service::insert_temperatures_all(&pool, &api_temp_measures).await {
-        Ok(()) => Ok("added sensor temperature measurements."),
+        Ok(()) => Ok("Added sensor temperature measurements."),
+        Err(e) => Err(ApiError::from(e)),
+    }
+}
+
+#[post("/sensor/humidity/add/all")]
+async fn post_humidity_all(
+    ThinData(pool): web::ThinData<Pool<Postgres>>,
+    api_temp_measures: web::Json<api::SensorSimpleMeasurements>,
+) -> actix_web::Result<impl Responder, ApiError> {
+    match service::insert_temperatures_all(&pool, &api_temp_measures).await {
+        Ok(()) => Ok("Added sensor humidity measurements."),
         Err(e) => Err(ApiError::from(e)),
     }
 }
@@ -87,13 +103,23 @@ async fn get_sensor_temperatures_range(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
 ) -> actix_web::Result<impl Responder, ApiError> {
     let (sensor_ref, start, end) = path.into_inner();
-    let temp_range = GetSensorTempMeasuresRange{
-        sensor_reference: sensor_ref,
-        start_datetime: chrono::DateTime::from_timestamp(start, 0).unwrap(),
-        end_datetime: chrono::DateTime::from_timestamp(end, 0).unwrap(),
-    };
-    match service::get_sensor_temperatures_in_range(
-        &pool, &temp_range).await {
+    let start_datetime = chrono::DateTime::from_timestamp(start, 0);
+    let end_datetime = chrono::DateTime::from_timestamp(end, 0);
+    let temp_range =
+        if let (Some(start_datetime), Some(end_datetime)) = (start_datetime, end_datetime) {
+            GetSensorSimpleMeasuresRange {
+                sensor_reference: sensor_ref,
+                start_datetime,
+                end_datetime,
+            }
+        } else {
+            return Err(ApiError::from(anyhow!(DateRangeError::from((
+                start_datetime,
+                end_datetime
+            )))));
+        };
+
+    match service::get_sensor_temperatures_in_range(&pool, &temp_range).await {
         Ok(api_temps) => Ok(web::Json(api_temps)),
         Err(e) => Err(ApiError::from(e)),
     }

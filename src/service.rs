@@ -1,10 +1,13 @@
 // service.rs
 
 use anyhow::anyhow;
-use schili_api::api::{self, GetSensorTempMeasuresRange};
+use log::{error, info};
+use schili_api::api::{self, GetSensorSimpleMeasuresRange};
 use sqlx::{Pool, Postgres};
 
-use crate::{api_db_conv::ModelInto, repository};
+use crate::{api_db_conv::ModelInto, repository::{self, DBSimpleMeasurement, Temperature}};
+
+// ++++++++++++++ Sensor - SECTION +++++++++++++++++++++
 
 pub async fn add_sensor(
     pool: &Pool<Postgres>,
@@ -22,30 +25,63 @@ pub async fn add_sensor(
     Ok(db_sensor)
 }
 
-pub async fn insert_temperature(
-    pool: &Pool<Postgres>,
-    api_temp_measure: &api::SensorSingleTempMeasure,
+// ++++++++++++++ Temperature - SECTION +++++++++++++++++++++
+
+pub async fn insert_temperature<'a, 'b>(
+    pool: &'a Pool<Postgres>,
+    api_temp_measure: &api::SensorSingleSimpleMeasure
 ) -> anyhow::Result<()> {
-    let (sensor_ref, mut db_temp): (String, repository::Temperature) =
+    let (sensor_ref, mut db_temp): (String, Temperature) =
         (&*api_temp_measure).model_into();
+
+        if let Err(e) = insert_simple_measurement(
+            pool, 
+            "temperature", 
+            &sensor_ref,
+            &mut db_temp, 
+                    repository::insert_single_sensor_temperature
+            )
+            .await {
+                error!("Could not insert temperatures from mq publish. error: {}", e);
+        }
+
+        info!(
+            "sensor temps: {}",
+            serde_json::to_string(api_temp_measure).unwrap()
+        );
+        Ok(())
+}
+
+pub async fn insert_simple_measurement<'a, 'b, 'c, T, Fut, F>(
+    pool: &'a Pool<Postgres>,
+    measure_name: &str,
+    sensor_ref: &str,
+    db_temp: &'b mut T,
+    db_insert: F) -> anyhow::Result<()> 
+where 
+    T: DBSimpleMeasurement + 'static,
+    Fut: Future<Output = std::result::Result<(), Box<dyn std::error::Error>>> 
+    + Send + 'c,
+    F: FnOnce(&'a Pool<Postgres>, i32, &'b mut T) -> Fut + 'static,
+{
     let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
         .await
         .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
-    repository::insert_single_sensor_temperature(&pool, sensor.sensor_id, &mut db_temp)
+    db_insert(&pool, sensor.sensor_id, db_temp)
         .await
         .map_err(|_| {
             anyhow!(
-                "Could not add temperature measurement for sensor with reference='{}'.",
+                "Could not add {} measurement for sensor with reference='{}'.",
+                measure_name,
                 sensor_ref
             )
         })?;
-
     Ok(())
 }
 
 pub async fn insert_temperatures_all(
     pool: &Pool<Postgres>,
-    api_temp_measures: &api::SensorTempMeasurements,
+    api_temp_measures: &api::SensorSimpleMeasurements,
 ) -> anyhow::Result<()> {
     let (sensor_ref, mut db_temps): (String, Vec<repository::Temperature>) =
         (&*api_temp_measures).model_into();
@@ -68,7 +104,7 @@ pub async fn insert_temperatures_all(
 pub async fn get_sensor_temperatures_all(
     pool: &Pool<Postgres>,
     sensor_ref: String,
-) -> anyhow::Result<api::SensorTempMeasurements> {
+) -> anyhow::Result<api::SensorSimpleMeasurements> {
     let sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
         .await
         .map_err(|_| {
@@ -86,14 +122,14 @@ pub async fn get_sensor_temperatures_all(
             )
         })?;
     let sensor_temps = (sensor_ref.to_owned(), temps);
-    let api_temps: api::SensorTempMeasurements = sensor_temps.model_into();
+    let api_temps: api::SensorSimpleMeasurements = sensor_temps.model_into();
     Ok(api_temps)
 }
 
 pub async fn get_sensor_temperatures_in_range(
     pool: &Pool<Postgres>,
-    sensor_temp_range: &GetSensorTempMeasuresRange,
-) -> anyhow::Result<api::SensorTempMeasurements> {
+    sensor_temp_range: &GetSensorSimpleMeasuresRange,
+) -> anyhow::Result<api::SensorSimpleMeasurements> {
     let sensor = repository::find_sensor_by_ref(
         &pool, &sensor_temp_range.sensor_reference)
         .await
@@ -120,7 +156,89 @@ pub async fn get_sensor_temperatures_in_range(
     let sensor_temps = (
         sensor_temp_range.sensor_reference.to_owned(), 
         temps);
-    let api_temps: api::SensorTempMeasurements = sensor_temps.model_into();
+    let api_temps: api::SensorSimpleMeasurements = sensor_temps.model_into();
+    Ok(api_temps)
+}
+
+// ++++++++++++++ Humidity - SECTION +++++++++++++++++++++
+
+pub async fn insert_humidity<'a, 'b>(
+    pool: &'a Pool<Postgres>,
+    api_temp_measure: &api::SensorSingleSimpleMeasure
+) -> anyhow::Result<()> {
+    let (sensor_ref, mut db_temp): (String, Temperature) =
+        (&*api_temp_measure).model_into();
+
+        if let Err(e) = insert_simple_measurement(
+            pool, 
+            "temperature", 
+            &sensor_ref,
+            &mut db_temp, 
+                    repository::insert_single_sensor_temperature
+            )
+            .await {
+                error!("Could not insert temperatures from mq publish. error: {}", e);
+        }
+
+        info!(
+            "sensor temps: {}",
+            serde_json::to_string(api_temp_measure).unwrap()
+        );
+        Ok(())
+}
+
+pub async fn insert_humidities_all(
+    pool: &Pool<Postgres>,
+    api_temp_measures: &api::SensorSimpleMeasurements,
+) -> anyhow::Result<()> {
+    let (sensor_ref, mut db_temps): (String, Vec<repository::Temperature>) =
+        (&*api_temp_measures).model_into();
+    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
+        .await
+        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
+    repository::insert_sensor_temperature_measures(&pool, sensor.sensor_id, &mut db_temps)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Could not add temperature measurements for sensor with reference='{}'.",
+                sensor_ref
+            )
+        })?;
+
+    Ok(())
+}
+
+pub async fn get_sensor_humidities_in_range(
+    pool: &Pool<Postgres>,
+    sensor_temp_range: &GetSensorSimpleMeasuresRange,
+) -> anyhow::Result<api::SensorSimpleMeasurements> {
+    let sensor = repository::find_sensor_by_ref(
+        &pool, &sensor_temp_range.sensor_reference)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Sensor with reference='{}' could not be found.",
+                &sensor_temp_range.sensor_reference,
+            )
+        })?;
+    let temps = 
+        repository::find_sensor_humidity_measures_by_timerange(
+            &pool, 
+            sensor.sensor_id, 
+            &sensor_temp_range.start_datetime,
+            &sensor_temp_range.end_datetime
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Error fetching humidity measurements for sensor with reference='{}'.",
+                &sensor_temp_range.sensor_reference
+            )
+        })?;
+    let sensor_temps = (
+        sensor_temp_range.sensor_reference.to_owned(), 
+        temps);
+    let api_temps: api::SensorSimpleMeasurements = sensor_temps.model_into();
     Ok(api_temps)
 }
 

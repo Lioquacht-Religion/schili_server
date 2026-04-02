@@ -2,9 +2,9 @@
 
 use std::collections::HashSet;
 
-use schili_api::api::{self, SensorTempMeasurements};
+use schili_api::api::{self, SensorSimpleMeasurements};
 
-use crate::repository;
+use crate::repository::{self, DBSimpleMeasurement};
 
 pub trait ModelFrom<T>: Sized {
     fn model_from(value: T) -> Self;
@@ -48,45 +48,49 @@ impl ModelFrom<&api::Sensor> for repository::Sensor {
     }
 }
 
-impl ModelFrom<&api::SensorTempMeasurements> for (String, Vec<repository::Temperature>) {
-    fn model_from(value: &api::SensorTempMeasurements) -> Self {
-        let temps: Vec<repository::Temperature> = value
-            .temp_measurements
+impl<T: DBSimpleMeasurement> ModelFrom<&api::SensorSimpleMeasurements> for (String, Vec<T>) {
+    fn model_from(value: &api::SensorSimpleMeasurements) -> Self {
+        let temps: Vec<T> = value
+            .measurements
             .iter()
             .map(|t| {
-                repository::Temperature::new(
-                    t.temp_celsius.clone(),
-                    t.measure_time.naive_utc().clone(),
-                )
+                DBSimpleMeasurement::new(t.measurement.clone(), t.measure_time.naive_utc().clone())
             })
             .collect();
         (value.sensor_reference.clone(), temps)
     }
 }
 
-impl ModelFrom<&api::SensorSingleTempMeasure> for (String, repository::Temperature) {
-    fn model_from(value: &api::SensorSingleTempMeasure) -> Self {
-        let temp: repository::Temperature = (&value.temp_measure).model_into();
-        (value.sensor_reference.clone(), temp)
+impl<T: DBSimpleMeasurement> ModelFrom<&api::SensorSingleSimpleMeasure> for (String, T) {
+    fn model_from(value: &api::SensorSingleSimpleMeasure) -> Self {
+        let measurement: T = (&value.measure).model_into();
+        (value.sensor_reference.clone(), measurement)
     }
 }
 
-impl ModelFrom<repository::Temperature> for api::TemperatureMeasurement {
-    fn model_from(value: repository::Temperature) -> Self {
-        api::TemperatureMeasurement {
-            temp_celsius: value.temp_celsius,
-            measure_time: value.measure_time.and_utc(),
+impl<T: DBSimpleMeasurement> ModelFrom<T> for api::SimpleMeasurement {
+    fn model_from(value: T) -> Self {
+        api::SimpleMeasurement {
+            measurement: value.measurement().clone(),
+            measure_time: value.measure_time().and_utc(),
         }
     }
 }
 
-impl ModelFrom<&api::TemperatureMeasurement> for repository::Temperature {
-    fn model_from(value: &api::TemperatureMeasurement) -> Self {
-        repository::Temperature{
-            temperature_id: -1,
-            sensor_id: -1,
-            temp_celsius: value.temp_celsius.clone(),
-            measure_time: value.measure_time.naive_utc(),
+impl<T: DBSimpleMeasurement> ModelFrom<&api::SimpleMeasurement> for T {
+    fn model_from(value: &api::SimpleMeasurement) -> Self {
+        T::new(value.measurement.clone(), value.measure_time.naive_utc())
+    }
+}
+
+impl<T: DBSimpleMeasurement> ModelFrom<(String, Vec<T>)> for api::SensorSimpleMeasurements {
+    fn model_from(value: (String, Vec<T>)) -> Self {
+        let (sensor_ref, temps) = value;
+        let temps: Vec<api::SimpleMeasurement> =
+            temps.into_iter().map(|t| t.model_into()).collect();
+        SensorSimpleMeasurements {
+            sensor_reference: sensor_ref,
+            measurements: temps,
         }
     }
 }
@@ -100,7 +104,7 @@ impl ModelFrom<&api::SensorSingleCo2Measure> for (String, repository::Co2) {
 
 impl ModelFrom<repository::Co2> for api::Co2Measurement {
     fn model_from(value: repository::Co2) -> Self {
-        api::Co2Measurement{
+        api::Co2Measurement {
             co2_ppm: value.co2_ppm,
             res0: value.res0,
             adc_val: value.adc_val_12bit,
@@ -111,25 +115,13 @@ impl ModelFrom<repository::Co2> for api::Co2Measurement {
 
 impl ModelFrom<&api::Co2Measurement> for repository::Co2 {
     fn model_from(value: &api::Co2Measurement) -> Self {
-        repository::Co2{
+        repository::Co2 {
             co2_id: -1,
             sensor_id: -1,
             co2_ppm: value.co2_ppm.clone(),
             res0: value.res0.clone(),
             adc_val_12bit: value.adc_val,
             measure_time: value.measure_time.naive_utc(),
-        }
-    }
-}
-
-impl ModelFrom<(String, Vec<repository::Temperature>)> for api::SensorTempMeasurements {
-    fn model_from(value: (String, Vec<repository::Temperature>)) -> Self {
-        let (sensor_ref, temps) = value;
-        let temps: Vec<api::TemperatureMeasurement> =
-            temps.into_iter().map(|t| t.model_into()).collect();
-        SensorTempMeasurements {
-            sensor_reference: sensor_ref,
-            temp_measurements: temps,
         }
     }
 }

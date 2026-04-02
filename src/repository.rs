@@ -34,6 +34,12 @@ pub enum SensorType {
     Co2,
 }
 
+pub trait DBSimpleMeasurement {
+    fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self;
+    fn measurement(&self) -> &BigDecimal;
+    fn measure_time(&self) -> NaiveDateTime;
+}
+
 pub struct Temperature {
     pub temperature_id: i64,
     pub sensor_id: i32,
@@ -41,7 +47,38 @@ pub struct Temperature {
     pub measure_time: NaiveDateTime,
 }
 
-pub struct Co2{
+impl DBSimpleMeasurement for Temperature {
+    fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self::new(measurement, measure_time)
+    }
+    fn measurement(&self) -> &BigDecimal {
+        &self.temp_celsius
+    }
+    fn measure_time(&self) -> NaiveDateTime {
+        self.measure_time
+    }
+}
+
+pub struct Humidity {
+    pub humidity_id: i64,
+    pub sensor_id: i32,
+    pub humidity_percent: BigDecimal,
+    pub measure_time: NaiveDateTime,
+}
+
+impl DBSimpleMeasurement for Humidity {
+    fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self::new(measurement, measure_time)
+    }
+    fn measurement(&self) -> &BigDecimal {
+        &self.humidity_percent
+    }
+    fn measure_time(&self) -> NaiveDateTime {
+        self.measure_time
+    }
+}
+
+pub struct Co2 {
     pub co2_id: i64,
     pub sensor_id: i32,
     pub co2_ppm: BigDecimal,
@@ -84,9 +121,20 @@ impl From<&SensorType> for &str {
 impl Temperature {
     pub fn new(temp_celsius: BigDecimal, measure_time: NaiveDateTime) -> Self {
         Self {
-            temperature_id: 0,
-            sensor_id: 0,
+            temperature_id: -1,
+            sensor_id: -1,
             temp_celsius,
+            measure_time,
+        }
+    }
+}
+
+impl Humidity {
+    pub fn new(humidity_percent: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self {
+            humidity_id: -1,
+            sensor_id: -1,
+            humidity_percent,
             measure_time,
         }
     }
@@ -195,7 +243,84 @@ pub async fn insert_single_sensor_temperature(
     temperature.temperature_id = temperature_id.temperature_id;
 
     Ok(())
-} 
+}
+
+pub async fn insert_sensor_humidity_measures(
+    pool: &PgPool,
+    sensor_id: i32,
+    humidities: &mut Vec<Humidity>,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let mut temps: Vec<BigDecimal> = Vec::with_capacity(humidities.len());
+    let mut times: Vec<chrono::NaiveDateTime> = Vec::with_capacity(humidities.len());
+    for t in humidities.iter() {
+        temps.push(t.humidity_percent.clone());
+        times.push(t.measure_time.clone());
+    }
+    sqlx::query!(
+        r#"
+           INSERT INTO temperatures (sensor_id, temp_celsius, measure_time) 
+           SELECT $1, temperature_arr.* 
+           FROM UNNEST($2::numeric(6, 3)[], $3::timestamp[]) AS temperature_arr
+        "#,
+        sensor_id,
+        &temps[..],
+        &times[..]
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn insert_single_sensor_humidity(
+    pool: &PgPool,
+    sensor_id: i32,
+    humidity: &mut Humidity,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let rec = sqlx::query!(
+        r#"
+           INSERT INTO humidities (sensor_id, humidity_percent, measure_time) 
+           VALUES ($1, $2, $3)
+           RETURNING humidity_id
+        "#,
+        sensor_id,
+        &humidity.humidity_percent,
+        &humidity.measure_time
+    )
+    .fetch_one(pool)
+    .await?;
+
+    humidity.humidity_id = rec.humidity_id;
+
+    Ok(())
+}
+
+pub async fn find_sensor_humidity_measures_by_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+) -> std::result::Result<Vec<Humidity>, Box<dyn std::error::Error>> {
+    match sqlx::query_as!(
+        Humidity,
+        r#"
+        SELECT h.humidity_id, s.sensor_id, h.humidity_percent, h.measure_time
+        FROM sensors s 
+        LEFT JOIN humidities h ON s.sensor_id = h.sensor_id
+        WHERE s.sensor_id = $1
+        AND $2 <= h.measure_time AND h.measure_time <= $3
+    "#,
+        sensor_id,
+        start_datetime.naive_utc(),
+        end_datetime.naive_utc()
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(hums) => Ok(hums),
+        Err(e) => Err(e.into()),
+    }
+}
 
 pub async fn insert_single_sensor_co2_measure(
     pool: &PgPool,
@@ -275,7 +400,7 @@ pub async fn find_sensor_temperature_measures_by_timerange(
     pool: &PgPool,
     sensor_id: i32,
     start_datetime: &chrono::DateTime<Utc>,
-    end_datetime: &chrono::DateTime<Utc>
+    end_datetime: &chrono::DateTime<Utc>,
 ) -> std::result::Result<Vec<Temperature>, Box<dyn std::error::Error>> {
     match sqlx::query_as!(
         Temperature,

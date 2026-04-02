@@ -19,7 +19,7 @@ pub async fn get_config() -> &'static Config {
 #[derive(Deserialize)]
 pub struct Config {
     database: DBConfig,
-    pub(crate) mqtt: MQTTConfig
+    pub(crate) mqtt: MQTTConfig,
 }
 
 #[derive(Deserialize)]
@@ -28,7 +28,7 @@ pub struct DBConfig {
 }
 
 #[derive(Deserialize)]
-pub struct MQTTConfig{
+pub struct MQTTConfig {
     pub(crate) broker_id: String,
     pub(crate) host: String,
     pub(crate) port: u16,
