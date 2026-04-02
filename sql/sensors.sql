@@ -52,6 +52,8 @@ CREATE TABLE air_pressures (
 	measure_time timestamp NOT NULL
 );
 
+ALTER TABLE air_pressures ALTER COLUMN air_pressure_pa TYPE numeric(32,9);
+
 CREATE TABLE co2 (
 	co2_id bigint PRIMARY KEY
 	GENERATED ALWAYS AS IDENTITY,
