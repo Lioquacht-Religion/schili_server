@@ -41,6 +41,14 @@ async fn subscribe_to_topics(client: &AsyncClient) {
         .await
         .unwrap();
     client
+        .subscribe(sensor_humidity_topic(UUID), QoS::AtMostOnce)
+        .await
+        .unwrap();
+    client
+        .subscribe(sensor_airpressure_topic(UUID), QoS::AtMostOnce)
+        .await
+        .unwrap();
+    client
         .subscribe(sensor_co2_topic(UUID), QoS::AtMostOnce)
         .await
         .unwrap();
@@ -72,7 +80,8 @@ async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
 
 async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Result<()>{
     if publish.topic.contains(&TOPICS.chip_temp) {
-        let chip_temp = extract_sensor_simple_measurement(publish)?;
+        let mut chip_temp = extract_sensor_simple_measurement(publish)?;
+        chip_temp.measure.measure_time = Utc::now();
         service::insert_chip_temperature(pool, &chip_temp).await?;
     }
     if publish.topic.contains(&TOPICS.temp) {
@@ -88,7 +97,7 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
     if publish.topic.contains(&TOPICS.air_pressure) {
         let mut sens_hums = extract_sensor_simple_measurement(&publish)?;
         sens_hums.measure.measure_time = Utc::now();
-        service::insert_humidity(pool, &sens_hums).await?;
+        service::insert_airpressure(pool, &sens_hums).await?;
     }
     if publish.topic.contains(&TOPICS.co2) {
         let mut sens_co2 = extract_sensor_co2(&publish)?;
