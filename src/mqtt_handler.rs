@@ -5,7 +5,7 @@ use std::time::Duration;
 use chrono::Utc;
 use log::{error, info};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS};
-use schili_api::mq_topics::{chip_temperature_topic, sensor_airpressure_topic, sensor_co2_topic, sensor_humidity_topic, sensor_temperature_topic, TOPICS};
+use schili_api::mq_topics::{chip_temperature_topic, sensor_airpressure_topic, sensor_battery_voltage_topic, sensor_co2_topic, sensor_humidity_topic, sensor_temperature_topic, TOPICS};
 use sqlx::{Pool, Postgres};
 
 use crate::{config::Config, database, service};
@@ -46,6 +46,10 @@ async fn subscribe_to_topics(client: &AsyncClient) {
         .unwrap();
     client
         .subscribe(sensor_airpressure_topic(UUID), QoS::AtMostOnce)
+        .await
+        .unwrap();
+    client
+        .subscribe(sensor_battery_voltage_topic(UUID), QoS::AtMostOnce)
         .await
         .unwrap();
     client
@@ -98,6 +102,11 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
         let mut sens_hums = extract_sensor_simple_measurement(&publish)?;
         sens_hums.measure.measure_time = Utc::now();
         service::insert_airpressure(pool, &sens_hums).await?;
+    }
+    if publish.topic.contains(&TOPICS.battery_voltage) {
+        let mut sens_battv = extract_sensor_simple_measurement(&publish)?;
+        sens_battv.measure.measure_time = Utc::now();
+        service::insert_battery_voltage(pool, &sens_battv).await?;
     }
     if publish.topic.contains(&TOPICS.co2) {
         let mut sens_co2 = extract_sensor_co2(&publish)?;

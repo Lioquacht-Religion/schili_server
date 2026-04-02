@@ -117,6 +117,25 @@ impl DBSimpleMeasurement for ChipTemperature{
     }
 }
 
+pub struct BatteryVoltage{
+    pub battery_voltage_id: i64,
+    pub sensor_id: i32,
+    pub battery_volt: BigDecimal,
+    pub measure_time: NaiveDateTime,
+}
+
+impl DBSimpleMeasurement for BatteryVoltage{
+    fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self::new(measurement, measure_time)
+    }
+    fn measurement(&self) -> &BigDecimal {
+        &self.battery_volt
+    }
+    fn measure_time(&self) -> NaiveDateTime {
+        self.measure_time
+    }
+}
+
 pub struct Co2 {
     pub co2_id: i64,
     pub sensor_id: i32,
@@ -197,6 +216,17 @@ impl ChipTemperature{
             chip_temperature_id: -1,
             sensor_id: -1,
             temp_celsius,
+            measure_time,
+        }
+    }
+}
+
+impl BatteryVoltage{
+    pub fn new(battery_volt: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self {
+            battery_voltage_id: -1,
+            sensor_id: -1,
+            battery_volt,
             measure_time,
         }
     }
@@ -569,6 +599,32 @@ pub async fn insert_single_sensor_chip_temperature(
 
     Ok(())
 }
+
+// ++++++++++++++ Battery voltage - SECTION +++++++++++++++++++++
+
+pub async fn insert_single_sensor_battery_voltage(
+    pool: &PgPool,
+    sensor_id: i32,
+    batt_volt: &mut BatteryVoltage,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let rec = sqlx::query!(
+        r#"
+           INSERT INTO battery_voltages (sensor_id, battery_volt, measure_time) 
+           VALUES ($1, $2, $3)
+           RETURNING battery_voltage_id
+        "#,
+        sensor_id,
+        &batt_volt.battery_volt,
+        &batt_volt.measure_time
+    )
+    .fetch_one(pool)
+    .await?;
+
+    batt_volt.battery_voltage_id = rec.battery_voltage_id;
+
+    Ok(())
+}
+
 // ++++++++++++++ Co2 - SECTION +++++++++++++++++++++
 
 pub async fn insert_single_sensor_co2_measure(

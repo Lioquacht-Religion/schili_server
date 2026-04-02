@@ -5,7 +5,7 @@ use log::{error, info};
 use schili_api::api::{self, GetSensorSimpleMeasuresRange};
 use sqlx::{Pool, Postgres};
 
-use crate::{api_db_conv::ModelInto, repository::{self, AirPressure, ChipTemperature, DBSimpleMeasurement, Humidity, Temperature}};
+use crate::{api_db_conv::ModelInto, repository::{self, AirPressure, BatteryVoltage, ChipTemperature, DBSimpleMeasurement, Humidity, Temperature}};
 
 // ++++++++++++++ Sensor - SECTION +++++++++++++++++++++
 
@@ -346,6 +346,33 @@ pub async fn insert_chip_temperature<'a>(
 
         info!(
             "sensor chip temperature: {}",
+            serde_json::to_string(api_temp_measure).unwrap()
+        );
+        Ok(())
+}
+
+// ++++++++++++++ Battery voltage - SECTION +++++++++++++++++++++
+
+pub async fn insert_battery_voltage<'a>(
+    pool: &'a Pool<Postgres>,
+    api_temp_measure: &api::SensorSingleSimpleMeasure
+) -> anyhow::Result<()> {
+    let (sensor_ref, mut db_temp): (String, BatteryVoltage) =
+        (&*api_temp_measure).model_into();
+
+        if let Err(e) = insert_simple_measurement(
+            pool, 
+            "battery voltage", 
+            &sensor_ref,
+            &mut db_temp, 
+                    repository::insert_single_sensor_battery_voltage
+        )
+            .await {
+                error!("Could not insert battery voltage from mq publish. error: {}", e);
+        }
+
+        info!(
+            "sensor battery voltage: {}",
             serde_json::to_string(api_temp_measure).unwrap()
         );
         Ok(())

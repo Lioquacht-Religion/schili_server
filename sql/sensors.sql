@@ -54,6 +54,15 @@ CREATE TABLE air_pressures (
 
 ALTER TABLE air_pressures ALTER COLUMN air_pressure_pa TYPE numeric(32,9);
 
+CREATE TABLE battery_voltages(
+	battery_voltage_id bigint PRIMARY KEY
+	GENERATED ALWAYS AS IDENTITY,
+	sensor_id integer 
+	REFERENCES sensors (sensor_id) NOT NULL,
+	battery_volt numeric(9, 6) NOT NULL,
+	measure_time timestamp NOT NULL
+);
+
 CREATE TABLE co2 (
 	co2_id bigint PRIMARY KEY
 	GENERATED ALWAYS AS IDENTITY,
