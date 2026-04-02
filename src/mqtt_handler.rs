@@ -58,7 +58,9 @@ async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
                     continue;
                 };
 
-                handle_publish(db_pool, &publish).await;
+                if let Err(e) = handle_publish(db_pool, &publish).await{
+                    error!("An error occured while trying to process published messages: error: {}", e);
+                };
             }
             Err(e) => {
                 println!("Received = {:?}", e);
@@ -68,23 +70,23 @@ async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
     }
 }
 
-async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) {
+async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Result<()>{
     if publish.topic.contains(&chip_temperature_topic(UUID)) {
         let temp = extract_temperature(publish);
         info!("chip temperature received: {:?}", temp);
     }
     if publish.topic.contains(&sensor_temperature_topic(UUID)) {
-        let mut sens_temps = extract_sensor_simple_measurement(&publish);
+        let mut sens_temps = extract_sensor_simple_measurement(&publish)?;
         sens_temps.measure.measure_time = Utc::now();
-        service::insert_temperature(pool, &sens_temps);
+        service::insert_temperature(pool, &sens_temps).await?;
     }
     if publish.topic.contains(&sensor_humidity_topic(UUID)) {
-        let mut sens_hums = extract_sensor_simple_measurement(&publish);
+        let mut sens_hums = extract_sensor_simple_measurement(&publish)?;
         sens_hums.measure.measure_time = Utc::now();
-        service::insert_humidity(pool, &sens_hums);
+        service::insert_humidity(pool, &sens_hums).await?;
     }
     if publish.topic.contains(&sensor_co2_topic(UUID)) {
-        let mut sens_co2 = extract_sensor_co2(&publish);
+        let mut sens_co2 = extract_sensor_co2(&publish)?;
         sens_co2.co2_measure.measure_time = Utc::now();
         if let Err(e) = service::insert_co2(pool, &sens_co2).await {
             error!("Could not insert co2 from mq publish. error: {}", e);
@@ -95,10 +97,11 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) {
             serde_json::to_string(&sens_co2).unwrap()
         );
     }
+    Ok(())
 }
 
-async fn handle_simple_measurement_msg(pool: &Pool<Postgres>, publish: &Publish, table_name: &str) {
-    let mut sens_temps = extract_sensor_simple_measurement(&publish);
+async fn handle_simple_measurement_msg(pool: &Pool<Postgres>, publish: &Publish, table_name: &str) -> anyhow::Result<()> {
+    let mut sens_temps = extract_sensor_simple_measurement(&publish)?;
     //TODO: maybe use local date here
     sens_temps.measure.measure_time = Utc::now();
     if let Err(e) = service::insert_temperature(pool, &sens_temps).await {
@@ -110,21 +113,21 @@ async fn handle_simple_measurement_msg(pool: &Pool<Postgres>, publish: &Publish,
 
     info!(
         "sensor temps: {}",
-        serde_json::to_string(&sens_temps).unwrap()
+        serde_json::to_string(&sens_temps)?
     );
+    Ok(())
 }
 
-//TODO: error handling
 fn extract_sensor_simple_measurement(
     publish: &Publish,
-) -> schili_api::api::SensorSingleSimpleMeasure {
+) -> anyhow::Result<schili_api::api::SensorSingleSimpleMeasure> {
     let json_str: String = String::from_utf8(publish.payload.to_vec()).unwrap();
-    serde_json::from_str(&json_str).unwrap()
+    Ok(serde_json::from_str(&json_str)?)
 }
 
-fn extract_sensor_co2(publish: &Publish) -> schili_api::api::SensorSingleCo2Measure {
-    let json_str: String = String::from_utf8(publish.payload.to_vec()).unwrap();
-    serde_json::from_str(&json_str).unwrap()
+fn extract_sensor_co2(publish: &Publish) -> anyhow::Result<schili_api::api::SensorSingleCo2Measure> {
+    let json_str: String = String::from_utf8(publish.payload.to_vec())?;
+    Ok(serde_json::from_str(&json_str)?)
 }
 
 fn extract_temperature(publish: &Publish) -> f32 {

@@ -47,7 +47,7 @@ pub async fn insert_temperature<'a, 'b>(
 
         info!(
             "sensor temps: {}",
-            serde_json::to_string(api_temp_measure).unwrap()
+            serde_json::to_string(api_temp_measure)?
         );
         Ok(())
 }
