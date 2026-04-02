@@ -108,17 +108,11 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
 fn extract_sensor_simple_measurement(
     publish: &Publish,
 ) -> anyhow::Result<schili_api::api::SensorSingleSimpleMeasure> {
-    let json_str: String = String::from_utf8(publish.payload.to_vec()).unwrap();
+    let json_str: String = String::from_utf8(publish.payload.to_vec())?;
     Ok(serde_json::from_str(&json_str)?)
 }
 
 fn extract_sensor_co2(publish: &Publish) -> anyhow::Result<schili_api::api::SensorSingleCo2Measure> {
     let json_str: String = String::from_utf8(publish.payload.to_vec())?;
     Ok(serde_json::from_str(&json_str)?)
-}
-
-fn extract_temperature(publish: &Publish) -> f32 {
-    let temp_bytes_arr: [u8; 4] = publish.payload[0..4].try_into().expect("4 bytes length");
-    let temp: f32 = f32::from_be_bytes(temp_bytes_arr);
-    temp
 }
