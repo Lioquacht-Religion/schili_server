@@ -5,7 +5,7 @@ use log::{error, info};
 use schili_api::api::{self, GetSensorSimpleMeasuresRange};
 use sqlx::{Pool, Postgres};
 
-use crate::{api_db_conv::ModelInto, repository::{self, DBSimpleMeasurement, Temperature}};
+use crate::{api_db_conv::ModelInto, repository::{self, AirPressure, ChipTemperature, DBSimpleMeasurement, Humidity, Temperature}};
 
 // ++++++++++++++ Sensor - SECTION +++++++++++++++++++++
 
@@ -166,18 +166,18 @@ pub async fn insert_humidity<'a, 'b>(
     pool: &'a Pool<Postgres>,
     api_temp_measure: &api::SensorSingleSimpleMeasure
 ) -> anyhow::Result<()> {
-    let (sensor_ref, mut db_temp): (String, Temperature) =
+    let (sensor_ref, mut db_temp): (String, Humidity) =
         (&*api_temp_measure).model_into();
 
         if let Err(e) = insert_simple_measurement(
             pool, 
-            "temperature", 
+            "humidity", 
             &sensor_ref,
             &mut db_temp, 
-                    repository::insert_single_sensor_temperature
+                    repository::insert_single_sensor_humidity
             )
             .await {
-                error!("Could not insert temperatures from mq publish. error: {}", e);
+                error!("Could not insert humidities from mq publish. error: {}", e);
         }
 
         info!(
@@ -191,16 +191,16 @@ pub async fn insert_humidities_all(
     pool: &Pool<Postgres>,
     api_temp_measures: &api::SensorSimpleMeasurements,
 ) -> anyhow::Result<()> {
-    let (sensor_ref, mut db_temps): (String, Vec<repository::Temperature>) =
+    let (sensor_ref, mut db_temps): (String, Vec<repository::Humidity>) =
         (&*api_temp_measures).model_into();
     let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
         .await
         .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
-    repository::insert_sensor_temperature_measures(&pool, sensor.sensor_id, &mut db_temps)
+    repository::insert_sensor_humidity_measures(&pool, sensor.sensor_id, &mut db_temps)
         .await
         .map_err(|_| {
             anyhow!(
-                "Could not add temperature measurements for sensor with reference='{}'.",
+                "Could not add humidity measurements for sensor with reference='{}'.",
                 sensor_ref
             )
         })?;
@@ -240,6 +240,115 @@ pub async fn get_sensor_humidities_in_range(
         temps);
     let api_temps: api::SensorSimpleMeasurements = sensor_temps.model_into();
     Ok(api_temps)
+}
+
+// ++++++++++++++ Airpressure - SECTION +++++++++++++++++++++
+
+pub async fn insert_airpressure<'a>(
+    pool: &'a Pool<Postgres>,
+    api_temp_measure: &api::SensorSingleSimpleMeasure
+) -> anyhow::Result<()> {
+    let (sensor_ref, mut db_temp): (String, AirPressure) =
+        (&*api_temp_measure).model_into();
+
+        if let Err(e) = insert_simple_measurement(
+            pool, 
+            "air pressure", 
+            &sensor_ref,
+            &mut db_temp, 
+                    repository::insert_single_sensor_airpressure
+            )
+            .await {
+                error!("Could not insert air pressures from mq publish. error: {}", e);
+        }
+
+        info!(
+            "sensor air pressures: {}",
+            serde_json::to_string(api_temp_measure).unwrap()
+        );
+        Ok(())
+}
+
+pub async fn insert_airpressure_all(
+    pool: &Pool<Postgres>,
+    api_temp_measures: &api::SensorSimpleMeasurements,
+) -> anyhow::Result<()> {
+    let (sensor_ref, mut db_temps): (String, Vec<repository::AirPressure>) =
+        (&*api_temp_measures).model_into();
+    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
+        .await
+        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
+    repository::insert_sensor_airpressure_measures(&pool, sensor.sensor_id, &mut db_temps)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Could not add air pressure measurements for sensor with reference='{}'.",
+                sensor_ref
+            )
+        })?;
+
+    Ok(())
+}
+
+pub async fn get_sensor_airpressure_in_range(
+    pool: &Pool<Postgres>,
+    sensor_temp_range: &GetSensorSimpleMeasuresRange,
+) -> anyhow::Result<api::SensorSimpleMeasurements> {
+    let sensor = repository::find_sensor_by_ref(
+        &pool, &sensor_temp_range.sensor_reference)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Sensor with reference='{}' could not be found.",
+                &sensor_temp_range.sensor_reference,
+            )
+        })?;
+    let temps = 
+        repository::find_sensor_airpressure_measures_by_timerange(
+            &pool, 
+            sensor.sensor_id, 
+            &sensor_temp_range.start_datetime,
+            &sensor_temp_range.end_datetime
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Error fetching air pressure measurements for sensor with reference='{}'.",
+                &sensor_temp_range.sensor_reference
+            )
+        })?;
+    let sensor_temps = (
+        sensor_temp_range.sensor_reference.to_owned(), 
+        temps);
+    let api_temps: api::SensorSimpleMeasurements = sensor_temps.model_into();
+    Ok(api_temps)
+}
+
+// ++++++++++++++ Chip temperature - SECTION +++++++++++++++++++++
+
+pub async fn insert_chip_temperature<'a>(
+    pool: &'a Pool<Postgres>,
+    api_temp_measure: &api::SensorSingleSimpleMeasure
+) -> anyhow::Result<()> {
+    let (sensor_ref, mut db_temp): (String, ChipTemperature) =
+        (&*api_temp_measure).model_into();
+
+        if let Err(e) = insert_simple_measurement(
+            pool, 
+            "chip temperature", 
+            &sensor_ref,
+            &mut db_temp, 
+                    repository::insert_single_sensor_chip_temperature 
+        )
+            .await {
+                error!("Could not insert chip temperature from mq publish. error: {}", e);
+        }
+
+        info!(
+            "sensor chip temperature: {}",
+            serde_json::to_string(api_temp_measure).unwrap()
+        );
+        Ok(())
 }
 
 // ++++++++++++++ CO2 - SECTION +++++++++++++++++++++

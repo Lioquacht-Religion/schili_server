@@ -1,5 +1,7 @@
 
-CREATE TYPE sensor_type AS ENUM ('chip', 'temperature', 'humidity', 'airpressure', 'co2');
+CREATE TYPE sensor_type AS ENUM ('temperature', 'humidity', 'airpressure', 'co2', 'chiptemperature');
+
+ALTER TYPE sensor_type ADD VALUE 'chiptemperature' AFTER 'co2';
 
 CREATE TABLE sensors(
 	sensor_id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,

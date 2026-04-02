@@ -14,8 +14,6 @@ pub struct ApiError {
 #[derive(Debug)]
 pub struct DateRangeError {
     error: String,
-    start: Option<DateTime<Utc>>,
-    end: Option<DateTime<Utc>>,
 }
 
 impl std::error::Error for DateRangeError {}
@@ -45,8 +43,6 @@ impl From<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)> for DateRangeError {
         }
         Self {
             error,
-            start: value.0,
-            end: value.1,
         }
     }
 }

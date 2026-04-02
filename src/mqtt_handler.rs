@@ -5,10 +5,10 @@ use std::time::Duration;
 use chrono::Utc;
 use log::{error, info};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS};
-use schili_api::mq_topics::{chip_temperature_topic, sensor_co2_topic, sensor_humidity_topic, sensor_temperature_topic};
+use schili_api::mq_topics::{chip_temperature_topic, sensor_airpressure_topic, sensor_co2_topic, sensor_humidity_topic, sensor_temperature_topic, TOPICS};
 use sqlx::{Pool, Postgres};
 
-use crate::{config::Config, database, repository::insert_single_sensor_temperature, service};
+use crate::{config::Config, database, service};
 
 static UUID: &str = "42";
 
@@ -71,21 +71,26 @@ async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
 }
 
 async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Result<()>{
-    if publish.topic.contains(&chip_temperature_topic(UUID)) {
-        let temp = extract_temperature(publish);
-        info!("chip temperature received: {:?}", temp);
+    if publish.topic.contains(&TOPICS.chip_temp) {
+        let chip_temp = extract_sensor_simple_measurement(publish)?;
+        service::insert_chip_temperature(pool, &chip_temp).await?;
     }
-    if publish.topic.contains(&sensor_temperature_topic(UUID)) {
+    if publish.topic.contains(&TOPICS.temp) {
         let mut sens_temps = extract_sensor_simple_measurement(&publish)?;
         sens_temps.measure.measure_time = Utc::now();
         service::insert_temperature(pool, &sens_temps).await?;
     }
-    if publish.topic.contains(&sensor_humidity_topic(UUID)) {
+    if publish.topic.contains(&TOPICS.humidity) {
         let mut sens_hums = extract_sensor_simple_measurement(&publish)?;
         sens_hums.measure.measure_time = Utc::now();
         service::insert_humidity(pool, &sens_hums).await?;
     }
-    if publish.topic.contains(&sensor_co2_topic(UUID)) {
+    if publish.topic.contains(&TOPICS.air_pressure) {
+        let mut sens_hums = extract_sensor_simple_measurement(&publish)?;
+        sens_hums.measure.measure_time = Utc::now();
+        service::insert_humidity(pool, &sens_hums).await?;
+    }
+    if publish.topic.contains(&TOPICS.co2) {
         let mut sens_co2 = extract_sensor_co2(&publish)?;
         sens_co2.co2_measure.measure_time = Utc::now();
         if let Err(e) = service::insert_co2(pool, &sens_co2).await {
@@ -97,24 +102,6 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
             serde_json::to_string(&sens_co2).unwrap()
         );
     }
-    Ok(())
-}
-
-async fn handle_simple_measurement_msg(pool: &Pool<Postgres>, publish: &Publish, table_name: &str) -> anyhow::Result<()> {
-    let mut sens_temps = extract_sensor_simple_measurement(&publish)?;
-    //TODO: maybe use local date here
-    sens_temps.measure.measure_time = Utc::now();
-    if let Err(e) = service::insert_temperature(pool, &sens_temps).await {
-        error!(
-            "Could not insert {table_name} from mq publish. error: {}",
-            e
-        );
-    }
-
-    info!(
-        "sensor temps: {}",
-        serde_json::to_string(&sens_temps)?
-    );
     Ok(())
 }
 

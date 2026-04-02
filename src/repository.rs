@@ -32,6 +32,7 @@ pub enum SensorType {
     Humidity,
     Airpressure,
     Co2,
+    ChipTemperature,
 }
 
 pub trait DBSimpleMeasurement {
@@ -78,6 +79,44 @@ impl DBSimpleMeasurement for Humidity {
     }
 }
 
+pub struct AirPressure{
+    pub air_pressure_id: i64,
+    pub sensor_id: i32,
+    pub air_pressure_pa: BigDecimal,
+    pub measure_time: NaiveDateTime,
+}
+
+impl DBSimpleMeasurement for AirPressure {
+    fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self::new(measurement, measure_time)
+    }
+    fn measurement(&self) -> &BigDecimal {
+        &self.air_pressure_pa
+    }
+    fn measure_time(&self) -> NaiveDateTime {
+        self.measure_time
+    }
+}
+
+pub struct ChipTemperature{
+    pub chip_temperature_id: i64,
+    pub sensor_id: i32,
+    pub temp_celsius: BigDecimal,
+    pub measure_time: NaiveDateTime,
+}
+
+impl DBSimpleMeasurement for ChipTemperature{
+    fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self::new(measurement, measure_time)
+    }
+    fn measurement(&self) -> &BigDecimal {
+        &self.temp_celsius
+    }
+    fn measure_time(&self) -> NaiveDateTime {
+        self.measure_time
+    }
+}
+
 pub struct Co2 {
     pub co2_id: i64,
     pub sensor_id: i32,
@@ -114,6 +153,7 @@ impl From<&SensorType> for &str {
             SensorType::Humidity => "humidity",
             SensorType::Airpressure => "airpressure",
             SensorType::Co2 => "co2",
+            SensorType::ChipTemperature => "chiptemperature",
         }
     }
 }
@@ -139,6 +179,30 @@ impl Humidity {
         }
     }
 }
+
+impl AirPressure {
+    pub fn new(air_pressure_pa: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self {
+            air_pressure_id: -1,
+            sensor_id: -1,
+            air_pressure_pa,
+            measure_time,
+        }
+    }
+}
+
+impl ChipTemperature{
+    pub fn new(temp_celsius: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self {
+            chip_temperature_id: -1,
+            sensor_id: -1,
+            temp_celsius,
+            measure_time,
+        }
+    }
+}
+
+// ++++++++++++++ Sensor - SECTION +++++++++++++++++++++
 
 pub async fn insert_sensor(
     pool: &PgPool,
@@ -195,6 +259,34 @@ pub async fn insert_sensor_with_sensor_types(
     Ok(())
 }
 
+pub async fn find_sensor_by_ref(
+    pool: &PgPool,
+    sensor_ref: &str,
+) -> std::result::Result<Sensor, Box<dyn std::error::Error>> {
+    match sqlx::query!(
+        r#"
+        SELECT s.sensor_id, s.sensor_name 
+        FROM sensors s 
+        WHERE s.sensor_reference = $1
+    "#,
+        sensor_ref
+    )
+    //TODO: maybe better error handling with anyhow crate?
+    .fetch_one(pool)
+    .await
+    {
+        Ok(rec) => Ok(Sensor::new_with_id(
+            rec.sensor_id,
+            sensor_ref,
+            &rec.sensor_name,
+            HashSet::new(),
+        )),
+        Err(e) => Err(e.into()),
+    }
+}
+
+// ++++++++++++++ Temperature - SECTION +++++++++++++++++++++
+
 pub async fn insert_sensor_temperature_measures(
     pool: &PgPool,
     sensor_id: i32,
@@ -244,6 +336,58 @@ pub async fn insert_single_sensor_temperature(
 
     Ok(())
 }
+
+#[deprecated]
+pub async fn find_sensor_temperature_measures(
+    pool: &PgPool,
+    sensor_id: i32,
+) -> std::result::Result<Vec<Temperature>, Box<dyn std::error::Error>> {
+    match sqlx::query_as!(
+        Temperature,
+        r#"
+        SELECT t.temperature_id, s.sensor_id, t.temp_celsius, t.measure_time
+        FROM sensors s 
+        LEFT JOIN temperatures t ON s.sensor_id = t.sensor_id
+        WHERE s.sensor_id = $1
+    "#,
+        sensor_id
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(temps) => Ok(temps),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub async fn find_sensor_temperature_measures_by_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+) -> std::result::Result<Vec<Temperature>, Box<dyn std::error::Error>> {
+    match sqlx::query_as!(
+        Temperature,
+        r#"
+        SELECT t.temperature_id, s.sensor_id, t.temp_celsius, t.measure_time
+        FROM sensors s 
+        LEFT JOIN temperatures t ON s.sensor_id = t.sensor_id
+        WHERE s.sensor_id = $1
+        AND $2 <= t.measure_time AND t.measure_time <= $3
+    "#,
+        sensor_id,
+        start_datetime.naive_utc(),
+        end_datetime.naive_utc()
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(temps) => Ok(temps),
+        Err(e) => Err(e.into()),
+    }
+}
+
+// ++++++++++++++ Humidity - SECTION +++++++++++++++++++++
 
 pub async fn insert_sensor_humidity_measures(
     pool: &PgPool,
@@ -322,6 +466,111 @@ pub async fn find_sensor_humidity_measures_by_timerange(
     }
 }
 
+// ++++++++++++++ Airpressure - SECTION +++++++++++++++++++++
+
+pub async fn insert_sensor_airpressure_measures(
+    pool: &PgPool,
+    sensor_id: i32,
+    airpressures: &mut Vec<AirPressure>,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let mut temps: Vec<BigDecimal> = Vec::with_capacity(airpressures.len());
+    let mut times: Vec<chrono::NaiveDateTime> = Vec::with_capacity(airpressures.len());
+    for t in airpressures.iter() {
+        temps.push(t.air_pressure_pa.clone());
+        times.push(t.measure_time.clone());
+    }
+    sqlx::query!(
+        r#"
+           INSERT INTO air_pressures (sensor_id, air_pressure_pa, measure_time) 
+           SELECT $1, air_pressures_arr.* 
+           FROM UNNEST($2::numeric(6, 3)[], $3::timestamp[]) AS air_pressures_arr
+        "#,
+        sensor_id,
+        &temps[..],
+        &times[..]
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn insert_single_sensor_airpressure(
+    pool: &PgPool,
+    sensor_id: i32,
+    air_pressure: &mut AirPressure,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let rec = sqlx::query!(
+        r#"
+           INSERT INTO air_pressures (sensor_id, air_pressure_pa, measure_time) 
+           VALUES ($1, $2, $3)
+           RETURNING air_pressure_id
+        "#,
+        sensor_id,
+        &air_pressure.air_pressure_pa,
+        &air_pressure.measure_time
+    )
+    .fetch_one(pool)
+    .await?;
+
+    air_pressure.air_pressure_id = rec.air_pressure_id;
+
+    Ok(())
+}
+
+pub async fn find_sensor_airpressure_measures_by_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+) -> std::result::Result<Vec<AirPressure>, Box<dyn std::error::Error>> {
+    match sqlx::query_as!(
+        AirPressure,
+        r#"
+        SELECT a.air_pressure_id, s.sensor_id, a.air_pressure_pa, a.measure_time
+        FROM sensors s 
+        LEFT JOIN air_pressures a ON s.sensor_id = a.sensor_id
+        WHERE s.sensor_id = $1
+        AND $2 <= a.measure_time AND a.measure_time <= $3
+    "#,
+        sensor_id,
+        start_datetime.naive_utc(),
+        end_datetime.naive_utc()
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(hums) => Ok(hums),
+        Err(e) => Err(e.into()),
+    }
+}
+
+// ++++++++++++++ Chip temerature - SECTION +++++++++++++++++++++
+
+pub async fn insert_single_sensor_chip_temperature(
+    pool: &PgPool,
+    sensor_id: i32,
+    chip_temp: &mut ChipTemperature,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let rec = sqlx::query!(
+        r#"
+           INSERT INTO chip_temperatures (sensor_id, temp_celsius, measure_time) 
+           VALUES ($1, $2, $3)
+           RETURNING chip_temperature_id
+        "#,
+        sensor_id,
+        &chip_temp.temp_celsius,
+        &chip_temp.measure_time
+    )
+    .fetch_one(pool)
+    .await?;
+
+    chip_temp.chip_temperature_id= rec.chip_temperature_id;
+
+    Ok(())
+}
+// ++++++++++++++ Co2 - SECTION +++++++++++++++++++++
+
 pub async fn insert_single_sensor_co2_measure(
     pool: &PgPool,
     sensor_id: i32,
@@ -347,78 +596,3 @@ pub async fn insert_single_sensor_co2_measure(
     Ok(())
 }
 
-pub async fn find_sensor_by_ref(
-    pool: &PgPool,
-    sensor_ref: &str,
-) -> std::result::Result<Sensor, Box<dyn std::error::Error>> {
-    match sqlx::query!(
-        r#"
-        SELECT s.sensor_id, s.sensor_name 
-        FROM sensors s 
-        WHERE s.sensor_reference = $1
-    "#,
-        sensor_ref
-    )
-    //TODO: maybe better error handling with anyhow crate?
-    .fetch_one(pool)
-    .await
-    {
-        Ok(rec) => Ok(Sensor::new_with_id(
-            rec.sensor_id,
-            sensor_ref,
-            &rec.sensor_name,
-            HashSet::new(),
-        )),
-        Err(e) => Err(e.into()),
-    }
-}
-
-#[deprecated]
-pub async fn find_sensor_temperature_measures(
-    pool: &PgPool,
-    sensor_id: i32,
-) -> std::result::Result<Vec<Temperature>, Box<dyn std::error::Error>> {
-    match sqlx::query_as!(
-        Temperature,
-        r#"
-        SELECT t.temperature_id, s.sensor_id, t.temp_celsius, t.measure_time
-        FROM sensors s 
-        LEFT JOIN temperatures t ON s.sensor_id = t.sensor_id
-        WHERE s.sensor_id = $1
-    "#,
-        sensor_id
-    )
-    .fetch_all(pool)
-    .await
-    {
-        Ok(temps) => Ok(temps),
-        Err(e) => Err(e.into()),
-    }
-}
-
-pub async fn find_sensor_temperature_measures_by_timerange(
-    pool: &PgPool,
-    sensor_id: i32,
-    start_datetime: &chrono::DateTime<Utc>,
-    end_datetime: &chrono::DateTime<Utc>,
-) -> std::result::Result<Vec<Temperature>, Box<dyn std::error::Error>> {
-    match sqlx::query_as!(
-        Temperature,
-        r#"
-        SELECT t.temperature_id, s.sensor_id, t.temp_celsius, t.measure_time
-        FROM sensors s 
-        LEFT JOIN temperatures t ON s.sensor_id = t.sensor_id
-        WHERE s.sensor_id = $1
-        AND $2 <= t.measure_time AND t.measure_time <= $3
-    "#,
-        sensor_id,
-        start_datetime.naive_utc(),
-        end_datetime.naive_utc()
-    )
-    .fetch_all(pool)
-    .await
-    {
-        Ok(temps) => Ok(temps),
-        Err(e) => Err(e.into()),
-    }
-}
