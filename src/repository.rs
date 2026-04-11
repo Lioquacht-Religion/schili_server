@@ -79,7 +79,7 @@ impl DBSimpleMeasurement for Humidity {
     }
 }
 
-pub struct AirPressure{
+pub struct AirPressure {
     pub air_pressure_id: i64,
     pub sensor_id: i32,
     pub air_pressure_pa: BigDecimal,
@@ -98,14 +98,14 @@ impl DBSimpleMeasurement for AirPressure {
     }
 }
 
-pub struct ChipTemperature{
+pub struct ChipTemperature {
     pub chip_temperature_id: i64,
     pub sensor_id: i32,
     pub temp_celsius: BigDecimal,
     pub measure_time: NaiveDateTime,
 }
 
-impl DBSimpleMeasurement for ChipTemperature{
+impl DBSimpleMeasurement for ChipTemperature {
     fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self {
         Self::new(measurement, measure_time)
     }
@@ -117,14 +117,14 @@ impl DBSimpleMeasurement for ChipTemperature{
     }
 }
 
-pub struct BatteryVoltage{
+pub struct BatteryVoltage {
     pub battery_voltage_id: i64,
     pub sensor_id: i32,
     pub battery_volt: BigDecimal,
     pub measure_time: NaiveDateTime,
 }
 
-impl DBSimpleMeasurement for BatteryVoltage{
+impl DBSimpleMeasurement for BatteryVoltage {
     fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self {
         Self::new(measurement, measure_time)
     }
@@ -210,7 +210,7 @@ impl AirPressure {
     }
 }
 
-impl ChipTemperature{
+impl ChipTemperature {
     pub fn new(temp_celsius: BigDecimal, measure_time: NaiveDateTime) -> Self {
         Self {
             chip_temperature_id: -1,
@@ -221,7 +221,7 @@ impl ChipTemperature{
     }
 }
 
-impl BatteryVoltage{
+impl BatteryVoltage {
     pub fn new(battery_volt: BigDecimal, measure_time: NaiveDateTime) -> Self {
         Self {
             battery_voltage_id: -1,
@@ -417,6 +417,31 @@ pub async fn find_sensor_temperature_measures_by_timerange(
     }
 }
 
+pub async fn find_sensor_last_temperature_before_at_datetime(
+    pool: &PgPool,
+    sensor_id: i32,
+    before_at_datetime: &chrono::DateTime<Utc>,
+) -> std::result::Result<Temperature, Box<dyn std::error::Error>> {
+    match sqlx::query_as!(
+        Temperature,
+        r#"
+        SELECT t.temperature_id, t.sensor_id, t.temp_celsius, t.measure_time
+        FROM temperatures t 
+        WHERE t.sensor_id = $1
+        AND t.measure_time <= $2
+        ORDER BY t.measure_time DESC LIMIT 1
+        "#,
+        sensor_id,
+        before_at_datetime.naive_utc(),
+    )
+    .fetch_one(pool)
+    .await
+    {
+        Ok(temps) => Ok(temps),
+        Err(e) => Err(e.into()),
+    }
+}
+
 // ++++++++++++++ Humidity - SECTION +++++++++++++++++++++
 
 pub async fn insert_sensor_humidity_measures(
@@ -595,7 +620,7 @@ pub async fn insert_single_sensor_chip_temperature(
     .fetch_one(pool)
     .await?;
 
-    chip_temp.chip_temperature_id= rec.chip_temperature_id;
+    chip_temp.chip_temperature_id = rec.chip_temperature_id;
 
     Ok(())
 }
@@ -651,4 +676,3 @@ pub async fn insert_single_sensor_co2_measure(
 
     Ok(())
 }
-

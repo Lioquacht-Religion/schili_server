@@ -5,7 +5,10 @@ use std::time::Duration;
 use chrono::Utc;
 use log::{error, info};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS};
-use schili_api::mq_topics::{chip_temperature_topic, sensor_airpressure_topic, sensor_battery_voltage_topic, sensor_co2_topic, sensor_humidity_topic, sensor_temperature_topic, TOPICS};
+use schili_api::mq_topics::{
+    TOPICS, chip_temperature_topic, sensor_airpressure_topic, sensor_battery_voltage_topic,
+    sensor_co2_topic, sensor_humidity_topic, sensor_temperature_topic,
+};
 use sqlx::{Pool, Postgres};
 
 use crate::{config::Config, database, service};
@@ -70,8 +73,11 @@ async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
                     continue;
                 };
 
-                if let Err(e) = handle_publish(db_pool, &publish).await{
-                    error!("An error occured while trying to process published messages: error: {}", e);
+                if let Err(e) = handle_publish(db_pool, &publish).await {
+                    error!(
+                        "An error occured while trying to process published messages: error: {}",
+                        e
+                    );
                 };
             }
             Err(e) => {
@@ -82,7 +88,7 @@ async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
     }
 }
 
-async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Result<()>{
+async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Result<()> {
     if publish.topic.contains(&TOPICS.chip_temp) {
         let mut chip_temp = extract_sensor_simple_measurement(publish)?;
         chip_temp.measure.measure_time = Utc::now();
@@ -130,7 +136,9 @@ fn extract_sensor_simple_measurement(
     Ok(serde_json::from_str(&json_str)?)
 }
 
-fn extract_sensor_co2(publish: &Publish) -> anyhow::Result<schili_api::api::SensorSingleCo2Measure> {
+fn extract_sensor_co2(
+    publish: &Publish,
+) -> anyhow::Result<schili_api::api::SensorSingleCo2Measure> {
     let json_str: String = String::from_utf8(publish.payload.to_vec())?;
     Ok(serde_json::from_str(&json_str)?)
 }

@@ -19,7 +19,8 @@ pub async fn get_config() -> &'static Config {
 #[derive(Deserialize)]
 pub struct Config {
     database: DBConfig,
-    pub(crate) mqtt: MQTTConfig,
+    pub mqtt: MQTTConfig,
+    pub email: EmailConfig,
 }
 
 #[derive(Deserialize)]
@@ -34,6 +35,16 @@ pub struct MQTTConfig {
     pub(crate) port: u16,
     pub(crate) username: String,
     pub(crate) passw: String,
+}
+
+#[derive(Deserialize)]
+pub struct EmailConfig {
+    pub(crate) smtp_server: String,
+    pub(crate) smtp_user: String,
+    pub(crate) smtp_passw: String,
+    pub(crate) author_name: String,
+    pub(crate) from_address: String,
+    pub(crate) to_addresses: Vec<String>,
 }
 
 impl Config {

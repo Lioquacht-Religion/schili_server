@@ -10,3 +10,11 @@ port = 1883
 username = "client_name"
 passw = "password"
 
+[email]
+smtp_server = "smtp.gmail.com"
+smtp_user = "example@gmail.com"
+smtp_passw = "password"
+author_name = "bob"
+from_address = "example@gmail.com"
+to_addresses = "example@gmail.com"
+

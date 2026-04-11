@@ -41,9 +41,7 @@ impl From<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)> for DateRangeError {
                 ));
             }
         }
-        Self {
-            error,
-        }
+        Self { error }
     }
 }
 
