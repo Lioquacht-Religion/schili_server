@@ -1,7 +1,8 @@
 // service.rs
 
 use anyhow::anyhow;
-use chrono::Utc;
+use bigdecimal::BigDecimal;
+use chrono::{TimeDelta, Utc};
 use log::{error, info};
 use schili_api::api::{self, GetSensorSimpleMeasuresRange};
 use sqlx::{Pool, Postgres};
@@ -35,6 +36,22 @@ pub async fn add_sensor(
 
 // ++++++++++++++ Temperature - SECTION +++++++++++++++++++++
 
+enum TempStatus {
+    HighTemp,
+    LowTemp,
+    StrongTempIncrease {
+        prev_temp: BigDecimal,
+        diff_temp: BigDecimal,
+    },
+    StrongTempDecrease {
+        prev_temp: BigDecimal,
+        diff_temp: BigDecimal,
+    },
+    NormalTemp,
+}
+
+const TEMP_CHANGE_WARNING: i32 = 10;
+
 pub async fn insert_temperature<'a, 'b>(
     pool: &'a Pool<Postgres>,
     api_temp_measure: &api::SensorSingleSimpleMeasure,
@@ -46,24 +63,90 @@ pub async fn insert_temperature<'a, 'b>(
         .await
         .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
     let cur_datetime = &Utc::now();
+
+    //TODO: make temp range checks be stored on the db and changeble by user through api
     //TODO: add check for rate of change, to send an email preemtivily
     // to warn of rapidly increasing temperatures
-    let send_mail = if let Ok(latest_temp) = 
+    // TODO: add variable min offset time to search for latest temperature
+    let cur_temp = &api_temp_measure.measure.measurement;
+    let temp_status: TempStatus = if let Ok(Temperature {
+        temp_celsius: prev_temp,
+        measure_time: prev_time,
+        ..
+    }) =
         repository::find_sensor_last_temperature_before_at_datetime(
-            pool, sensor.sensor_id, cur_datetime)
-        .await{
-            !(latest_temp.measurement() >= &32.into()
-            || latest_temp.measurement() <= &3.into())
-    }
-    else{ true };
+            pool,
+            sensor.sensor_id,
+            cur_datetime,
+        )
+        .await
+    {
+        let bd_32 = 32.into();
+        let bd_3 = 3.into();
+        if cur_temp >= &bd_32
+            && !(&prev_temp >= &bd_32
+                && cur_datetime.naive_utc() - prev_time <= TimeDelta::minutes(30))
+        {
+            TempStatus::HighTemp
+        } else if cur_temp <= &bd_3
+            && !(&prev_temp >= &bd_3
+                && cur_datetime.naive_utc() - prev_time <= TimeDelta::minutes(30))
+        {
+            TempStatus::LowTemp
+        } else {
+            let diff_temp: BigDecimal = cur_temp - &prev_temp;
+            if diff_temp >= TEMP_CHANGE_WARNING.into() {
+                TempStatus::StrongTempIncrease {
+                    prev_temp,
+                    diff_temp,
+                }
+            } else if diff_temp <= TEMP_CHANGE_WARNING.into() {
+                TempStatus::StrongTempDecrease {
+                    prev_temp,
+                    diff_temp,
+                }
+            } else {
+                TempStatus::NormalTemp
+            }
+        }
+    } else {
+        if cur_temp >= &32.into() {
+            TempStatus::HighTemp
+        } else if cur_temp <= &3.into() {
+            TempStatus::LowTemp
+        } else {
+            TempStatus::NormalTemp
+        }
+    };
 
     let email_config = &config::get_config().await.email;
-    if &api_temp_measure.measure.measurement >= &32.into() || send_mail {
-        email::send_high_temp_warning_email(
-            &email_config, &api_temp_measure.measure.measurement);
-    } else if &api_temp_measure.measure.measurement <= &3.into() || send_mail {
-        email::send_low_temp_warning_email(
-            &email_config, &api_temp_measure.measure.measurement);
+    match temp_status {
+        TempStatus::HighTemp => email::send_high_temp_warning_email(
+            &email_config,
+            &api_temp_measure.measure.measurement,
+        ),
+        TempStatus::LowTemp => {
+            email::send_low_temp_warning_email(&email_config, &api_temp_measure.measure.measurement)
+        }
+        TempStatus::StrongTempIncrease {
+            prev_temp,
+            diff_temp,
+        } => email::send_strong_temp_increase_email(
+            &email_config,
+            &api_temp_measure.measure.measurement,
+            &prev_temp,
+            &diff_temp,
+        ),
+        TempStatus::StrongTempDecrease {
+            prev_temp,
+            diff_temp,
+        } => email::send_strong_temp_decrease_email(
+            &email_config,
+            &api_temp_measure.measure.measurement,
+            &prev_temp,
+            &diff_temp,
+        ),
+        TempStatus::NormalTemp => {}
     }
 
     repository::insert_single_sensor_temperature(&pool, sensor.sensor_id, &mut db_temp)

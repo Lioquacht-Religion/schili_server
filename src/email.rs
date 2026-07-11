@@ -10,11 +10,8 @@ use log::error;
 
 use crate::config::EmailConfig;
 
-pub fn send_server_started_email(
-    email_conf: &EmailConfig,
-) {
-    let email_text = 
-        r#"
+pub fn send_server_started_email(email_conf: &EmailConfig) {
+    let email_text = r#"
         <!DOCTYPE html>
         <html>
           <head>
@@ -28,15 +25,11 @@ pub fn send_server_started_email(
             <h2>Empfangen Sie den Spam mit Ehre, Freude und einem offenen Herzen. ❤️</h2>
           </body>
         </html>
-        "#
-    ;
+        "#;
     send_email_log_error(email_conf, "Server wurde gestartet", email_text.to_owned());
 }
 
-pub fn send_low_batt_voltage_warning_email(
-    email_conf: &EmailConfig,
-    batt_voltage: &BigDecimal,
-) {
+pub fn send_low_batt_voltage_warning_email(email_conf: &EmailConfig, batt_voltage: &BigDecimal) {
     let email_text = format!(
         r#"
         <!DOCTYPE html>
@@ -56,10 +49,7 @@ pub fn send_low_batt_voltage_warning_email(
     send_email_log_error(email_conf, "Niedrige Batteriespannung", email_text);
 }
 
-pub fn send_high_chip_temp_warning_email(
-    email_conf: &EmailConfig,
-    temp_celsius: &BigDecimal,
-) {
+pub fn send_high_chip_temp_warning_email(email_conf: &EmailConfig, temp_celsius: &BigDecimal) {
     let email_text = format!(
         r#"
         <!DOCTYPE html>
@@ -79,20 +69,17 @@ pub fn send_high_chip_temp_warning_email(
     send_email_log_error(email_conf, "Hohe Prozessortemperatur", email_text);
 }
 
-pub fn send_high_temp_warning_email(
-    email_conf: &EmailConfig,
-    temp_celsius: &BigDecimal,
-) {
+pub fn send_high_temp_warning_email(email_conf: &EmailConfig, temp_celsius: &BigDecimal) {
     let email_text = format!(
         r#"
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Hohe temperatur wurde gemessen!</title>
+            <title>Hohe Temperatur wurde gemessen!</title>
             <meta http-equiv="content-type" content="text/html; charset=utf-8" />
           </head>
           <body>
-            <h1>Hohe temperatur wurde gerade gemessen!</h1>
+            <h1>Hohe Temperatur wurde gerade gemessen!</h1>
             <h1>Temperatur: {} Grad Celsius</h1>
           </body>
         </html>
@@ -102,10 +89,7 @@ pub fn send_high_temp_warning_email(
     send_email_log_error(email_conf, "Hohe Temperatur", email_text);
 }
 
-pub fn send_low_temp_warning_email(
-    email_conf: &EmailConfig,
-    temp_celsius: &BigDecimal,
-) {
+pub fn send_low_temp_warning_email(email_conf: &EmailConfig, temp_celsius: &BigDecimal) {
     let email_text = format!(
         r#"
         <!DOCTYPE html>
@@ -115,7 +99,7 @@ pub fn send_low_temp_warning_email(
             <meta http-equiv="content-type" content="text/html; charset=utf-8" />
           </head>
           <body>
-            <h1>Niedrige temperatur wurde gerade gemessen!</h1>
+            <h1>Niedrige Temperatur wurde gerade gemessen!</h1>
             <h1>Temperatur: {} Grad Celsius</h1>
           </body>
         </html>
@@ -125,13 +109,71 @@ pub fn send_low_temp_warning_email(
     send_email_log_error(email_conf, "Niedrige Temperatur", email_text);
 }
 
+pub fn send_strong_temp_increase_email(
+    email_conf: &EmailConfig,
+    temp_cur_celsius: &BigDecimal,
+    temp_prev_celsius: &BigDecimal,
+    temp_diff_celsius: &BigDecimal,
+) {
+    let email_text = format!(
+        r#"
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Stark steigende Temperatur wurde gerade gemessen!</title>
+            <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+          </head>
+          <body>
+            <h1>Stark steigende Temperatur wurde gerade gemessen!</h1>
+            <h1>Temperatur ist um {} Grad Celsius gestiegen!</h1>
+            <h1>Derzeitge Temperatur: {} Grad Celsius</h1>
+            <h1>Vorherige Temperatur: {} Grad Celsius</h1>
+          </body>
+        </html>
+        "#,
+        temp_diff_celsius, temp_cur_celsius, temp_prev_celsius,
+    );
+    send_email_log_error(email_conf, "Stark steigende Temperatur", email_text);
+}
+
+pub fn send_strong_temp_decrease_email(
+    email_conf: &EmailConfig,
+    temp_cur_celsius: &BigDecimal,
+    temp_prev_celsius: &BigDecimal,
+    temp_diff_celsius: &BigDecimal,
+) {
+    let email_text = format!(
+        r#"
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Stark sinkende Temperatur wurde gerade gemessen!</title>
+            <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+          </head>
+          <body>
+            <h1>Stark sinkende Temperatur wurde gerade gemessen!</h1>
+            <h1>Temperatur ist um {} Grad Celsius gesunken!</h1>
+            <h1>Derzeitge Temperatur: {} Grad Celsius</h1>
+            <h1>Vorherige Temperatur: {} Grad Celsius</h1>
+          </body>
+        </html>
+        "#,
+        temp_diff_celsius, temp_cur_celsius, temp_prev_celsius,
+    );
+    send_email_log_error(email_conf, "Stark sinkende Temperatur", email_text);
+}
+
 pub fn send_email_log_error(email_conf: &EmailConfig, subject: &str, email_text: String) {
-    if let Err(e) = send_email(email_conf, subject, email_text){
+    if let Err(e) = send_email(email_conf, subject, email_text) {
         error!("Email could not be sent. Error: {}", e);
     }
 }
 
-pub fn send_email(email_conf: &EmailConfig, subject: &str, email_text: String) -> anyhow::Result<()> {
+pub fn send_email(
+    email_conf: &EmailConfig,
+    subject: &str,
+    email_text: String,
+) -> anyhow::Result<()> {
     let email = create_email_message(email_conf, email_text, subject)?;
 
     let creds = Credentials::new(
@@ -148,18 +190,17 @@ pub fn send_email(email_conf: &EmailConfig, subject: &str, email_text: String) -
     Ok(())
 }
 
-fn create_email_message(email_conf: &EmailConfig, email_text: String, subject: &str) -> anyhow::Result<Message>{
-    let mut email = Message::builder()
-        .from(Mailbox::new(
-            Some(email_conf.author_name.to_owned()),
-            email_conf.from_address.parse()?,
-        ));
-    for address in email_conf.to_addresses.iter(){
-        email = email
-        .to(Mailbox::new(
-                    None,
-            address.to_owned().parse()?,
-        ));
+fn create_email_message(
+    email_conf: &EmailConfig,
+    email_text: String,
+    subject: &str,
+) -> anyhow::Result<Message> {
+    let mut email = Message::builder().from(Mailbox::new(
+        Some(email_conf.author_name.to_owned()),
+        email_conf.from_address.parse()?,
+    ));
+    for address in email_conf.to_addresses.iter() {
+        email = email.to(Mailbox::new(None, address.to_owned().parse()?));
     }
     let email = email
         .subject(subject)
