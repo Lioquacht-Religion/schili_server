@@ -1,7 +1,7 @@
 // service.rs
 
 use anyhow::anyhow;
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, FromPrimitive};
 use chrono::{TimeDelta, Utc};
 use log::{error, info};
 use schili_api::api::{self, GetSensorSimpleMeasuresRange};
@@ -469,7 +469,8 @@ pub async fn insert_battery_voltage<'a>(
     api_battvolt_measure: &api::SensorSingleSimpleMeasure,
 ) -> anyhow::Result<()> {
     let email_config = &config::get_config().await.email;
-    if &api_battvolt_measure.measure.measurement <= &1.into() {
+    if &api_battvolt_measure.measure.measurement <= &BigDecimal::from_f32(0.48)
+        .expect("f32 Number should be representable by bigdecimal.") {
         email::send_low_batt_voltage_warning_email(
             &email_config,
             &api_battvolt_measure.measure.measurement,
