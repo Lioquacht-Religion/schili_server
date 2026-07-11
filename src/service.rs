@@ -100,7 +100,7 @@ pub async fn insert_temperature<'a, 'b>(
                     prev_temp,
                     diff_temp,
                 }
-            } else if diff_temp.is_negative() && &diff_temp.abs() <= &TEMP_CHANGE_WARNING.into() {
+            } else if diff_temp.is_negative() && &diff_temp.abs() >= &TEMP_CHANGE_WARNING.into() {
                 TempStatus::StrongTempDecrease {
                     prev_temp,
                     diff_temp,
