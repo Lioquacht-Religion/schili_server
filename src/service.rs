@@ -1,7 +1,7 @@
 // service.rs
 
 use anyhow::anyhow;
-use bigdecimal::{BigDecimal, FromPrimitive};
+use bigdecimal::{BigDecimal, FromPrimitive, Signed};
 use chrono::{TimeDelta, Utc};
 use log::{error, info};
 use schili_api::api::{self, GetSensorSimpleMeasuresRange};
@@ -95,12 +95,12 @@ pub async fn insert_temperature<'a, 'b>(
             TempStatus::LowTemp
         } else {
             let diff_temp: BigDecimal = cur_temp - &prev_temp;
-            if diff_temp >= TEMP_CHANGE_WARNING.into() {
+            if &diff_temp >= &TEMP_CHANGE_WARNING.into() {
                 TempStatus::StrongTempIncrease {
                     prev_temp,
                     diff_temp,
                 }
-            } else if diff_temp <= TEMP_CHANGE_WARNING.into() {
+            } else if diff_temp.is_negative() && &diff_temp.abs() <= &TEMP_CHANGE_WARNING.into() {
                 TempStatus::StrongTempDecrease {
                     prev_temp,
                     diff_temp,
