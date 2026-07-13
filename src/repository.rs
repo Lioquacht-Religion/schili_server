@@ -1,9 +1,10 @@
 // repository.rs
 
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Div};
 
-use chrono::{NaiveDateTime, Utc};
-use sqlx::{PgPool, Pool, Postgres, types::BigDecimal};
+use anyhow::anyhow;
+use chrono::{Duration, NaiveDateTime, TimeDelta, Utc};
+use sqlx::{PgPool, Pool, Postgres, postgres::types::PgInterval, types::BigDecimal};
 
 pub async fn start_sql_query(
     pool: &Pool<Postgres>,
@@ -409,6 +410,70 @@ pub async fn find_sensor_temperature_measures_by_timerange(
         start_datetime.naive_utc(),
         end_datetime.naive_utc()
     )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(temps) => Ok(temps),
+        Err(e) => Err(e.into()),
+    }
+}
+
+const MAX_INTERVAL_NUM: u64= 10_000;
+
+//TODO: improve performance, add safe guards, max min start end datetimes
+//TODO: add better errors with specific enum
+pub async fn find_sensor_avg_temperature_measures_by_intervals_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+    interval: TimeDelta
+) -> std::result::Result<Vec<(NaiveDateTime, BigDecimal)>, Box<dyn std::error::Error>> {
+    let interval_count = ((*end_datetime - start_datetime).num_milliseconds() / interval.num_milliseconds()).unsigned_abs();
+    if interval_count > MAX_INTERVAL_NUM{
+        return Err(anyhow!("Number of intervals between start and end timestamp is above maximum of 10.000.").into());
+    }
+    let interval : PgInterval = interval.try_into()
+        .map_err(|e| anyhow!("Invalid interval was supplied: {}", e))?;
+
+    let min_max_ts  = sqlx::query!(
+        r#"
+        SELECT MIN(t.measure_time) min_ts, MAX(t.measure_time) max_ts
+        FROM temperatures t WHERE t.sensor_id = $1
+        "#, sensor_id
+    ).fetch_one(pool).await?;
+
+    let (min_ts, max_ts) = 
+    if let (Some(min_ts), Some(max_ts)) = (min_max_ts.min_ts, min_max_ts.max_ts){
+        (
+            start_datetime.naive_utc().clamp(min_ts, max_ts), 
+            end_datetime.naive_utc().clamp(min_ts, max_ts),
+        )
+    }
+    else{
+        return Err(anyhow!("No entries found!").into());
+    };
+
+    match sqlx::query!(
+        r#"
+        SELECT d::timestamp temp_from, avg(t.temp_celsius) avg_temp
+        FROM temperatures t 
+        INNER JOIN generate_series(
+            $2::timestamp, $3::timestamp, $4::interval
+        ) d
+        ON t.measure_time >= d::timestamp AND measure_time <= d::timestamp + $4 
+        WHERE 
+            t.sensor_id = $1
+            AND measure_time >= $2 AND measure_time <= $3
+        GROUP BY d::timestamp ORDER BY d::timestamp desc
+        "#,
+        sensor_id,
+        min_ts,
+        max_ts,
+        interval
+    )
+        //NOTE: unwrap, query should not be able to return null values
+        .map(|r| (r.temp_from.unwrap(), r.avg_temp.unwrap()))
     .fetch_all(pool)
     .await
     {

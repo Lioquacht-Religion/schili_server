@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use bigdecimal::{BigDecimal, FromPrimitive, Signed};
 use chrono::{TimeDelta, Utc};
 use log::{error, info};
-use schili_api::api::{self, GetSensorSimpleMeasuresRange};
+use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SimpleMeasurement};
 use sqlx::{Pool, Postgres};
 
 use crate::{
@@ -265,6 +265,43 @@ pub async fn get_sensor_temperatures_in_range(
     let api_temps: api::SensorSimpleMeasurements = sensor_temps.model_into();
     Ok(api_temps)
 }
+
+pub async fn get_sensor_avg_temperatures_by_intervals_in_range(
+    pool: &Pool<Postgres>,
+    sensor_temp_range: &GetSensorSimpleMeasuresIntervalsRange,
+) -> anyhow::Result<api::SensorSimpleMeasurements> {
+    let sensor = repository::find_sensor_by_ref(&pool, &sensor_temp_range.sensor_reference)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Sensor with reference='{}' could not be found.",
+                &sensor_temp_range.sensor_reference,
+            )
+        })?;
+    let temps = repository::find_sensor_avg_temperature_measures_by_intervals_in_timerange(
+        &pool,
+        sensor.sensor_id,
+        &sensor_temp_range.start_datetime,
+        &sensor_temp_range.end_datetime,
+        sensor_temp_range.interval
+    )
+    .await
+    .map_err(|_| {
+        anyhow!(
+            "Error fetching temperature measurements for sensor with reference='{}'.",
+            &sensor_temp_range.sensor_reference
+        )
+    })?;
+    let api_temps = api::SensorSimpleMeasurements{
+        sensor_reference: sensor.sensor_reference,
+        measurements: temps.into_iter().map(|(dt, temp)| SimpleMeasurement{
+            measure_time: dt.and_utc(),
+            measurement: temp,
+        }).collect()
+    };
+    Ok(api_temps)
+}
+
 
 // ++++++++++++++ Humidity - SECTION +++++++++++++++++++++
 

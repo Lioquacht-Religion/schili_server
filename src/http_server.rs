@@ -9,12 +9,12 @@ use actix_web::{
 use anyhow::anyhow;
 use sqlx::{Pool, Postgres};
 
-use schili_api::api::{self, GetSensorSimpleMeasuresRange};
+use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange};
 
 use crate::{
     database,
     error::{ApiError, DateRangeError},
-    service,
+    service::{self},
 };
 
 pub async fn start_http_server() -> std::io::Result<()> {
@@ -32,6 +32,7 @@ pub async fn start_http_server() -> std::io::Result<()> {
             .service(post_temperature_all)
             .service(get_sensor_temperatures_all)
             .service(get_sensor_temperatures_range)
+            .service(get_sensor_avg_temperatures_interval_in_range)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
@@ -120,6 +121,36 @@ async fn get_sensor_temperatures_range(
         };
 
     match service::get_sensor_temperatures_in_range(&pool, &temp_range).await {
+        Ok(api_temps) => Ok(web::Json(api_temps)),
+        Err(e) => Err(ApiError::from(e)),
+    }
+}
+
+#[get("/sensor/temperature/avg/interval/range/{sensor_reference}/{start_datetime}/{end_datetime}/{interval}")]
+async fn get_sensor_avg_temperatures_interval_in_range(
+    path: web::Path<(String, i64, i64, i64)>,
+    ThinData(pool): web::ThinData<Pool<Postgres>>,
+) -> actix_web::Result<impl Responder, ApiError> {
+    let (sensor_ref, start, end, interval) = path.into_inner();
+    let start_datetime = chrono::DateTime::from_timestamp(start, 0);
+    let end_datetime = chrono::DateTime::from_timestamp(end, 0);
+    let interval = chrono::TimeDelta::minutes(interval);
+    let temp_range =
+        if let (Some(start_datetime), Some(end_datetime)) = (start_datetime, end_datetime) {
+            GetSensorSimpleMeasuresIntervalsRange{
+                sensor_reference: sensor_ref,
+                start_datetime,
+                end_datetime,
+                interval,
+            }
+        } else {
+            return Err(ApiError::from(anyhow!(DateRangeError::from((
+                start_datetime,
+                end_datetime
+            )))));
+        };
+
+    match service::get_sensor_avg_temperatures_by_intervals_in_range(&pool, &temp_range).await {
         Ok(api_temps) => Ok(web::Json(api_temps)),
         Err(e) => Err(ApiError::from(e)),
     }
