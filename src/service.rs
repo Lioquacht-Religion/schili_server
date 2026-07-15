@@ -8,12 +8,9 @@ use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimp
 use sqlx::{Pool, Postgres};
 
 use crate::{
-    api_db_conv::ModelInto,
-    config, email,
-    repository::{
-        self, AirPressure, BatteryVoltage, ChipTemperature, DBSimpleMeasurement, Humidity,
-        Temperature,
-    },
+    api_db_conv::ModelInto, config, email, http_server::MeasurementKinds, repository::{
+        self, AirPressure, AvgMeasureTimeInterval, BatteryVoltage, ChipTemperature, DBSimpleMeasurement, Humidity, Temperature
+    }
 };
 
 // ++++++++++++++ Sensor - SECTION +++++++++++++++++++++
@@ -266,9 +263,10 @@ pub async fn get_sensor_temperatures_in_range(
     Ok(api_temps)
 }
 
-pub async fn get_sensor_avg_temperatures_by_intervals_in_range(
+pub async fn get_sensor_avg_measurements_by_intervals_in_range(
     pool: &Pool<Postgres>,
     sensor_temp_range: &GetSensorSimpleMeasuresIntervalsRange,
+    measurement_kind: MeasurementKinds
 ) -> anyhow::Result<api::SensorSimpleMeasurements> {
     let sensor = repository::find_sensor_by_ref(&pool, &sensor_temp_range.sensor_reference)
         .await
@@ -278,25 +276,29 @@ pub async fn get_sensor_avg_temperatures_by_intervals_in_range(
                 &sensor_temp_range.sensor_reference,
             )
         })?;
-    let temps = repository::find_sensor_avg_temperature_measures_by_intervals_in_timerange(
-        &pool,
-        sensor.sensor_id,
-        &sensor_temp_range.start_datetime,
-        &sensor_temp_range.end_datetime,
-        sensor_temp_range.interval
-    )
-    .await
-    .map_err(|_| {
+    let result = match measurement_kind{
+        MeasurementKinds::Temperature => repository::find_sensor_avg_temperatures_by_intervals_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime,sensor_temp_range.interval).await,
+        MeasurementKinds::Humidity => repository::find_sensor_avg_humidities_by_intervals_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime,sensor_temp_range.interval).await,
+        MeasurementKinds::AirPressure => repository::find_sensor_avg_airpressures_by_intervals_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime,sensor_temp_range.interval).await,
+        MeasurementKinds::Co2 => todo!(),
+        MeasurementKinds::BatteryVoltage => repository::find_sensor_avg_battvolt_by_intervals_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime,sensor_temp_range.interval).await,
+    };
+    let temps = result
+    .map_err(|e| {
         anyhow!(
-            "Error fetching temperature measurements for sensor with reference='{}'.",
+            "Error fetching temperature measurements for sensor with reference='{}'. Error: {e}",
             &sensor_temp_range.sensor_reference
         )
     })?;
     let api_temps = api::SensorSimpleMeasurements{
         sensor_reference: sensor.sensor_reference,
-        measurements: temps.into_iter().map(|(dt, temp)| SimpleMeasurement{
-            measure_time: dt.and_utc(),
-            measurement: temp,
+        measurements: temps.into_iter().map(|AvgMeasureTimeInterval{timestamp_from, avg_measurement}| SimpleMeasurement{
+            measure_time: timestamp_from.and_utc(),
+            measurement: avg_measurement,
         }).collect()
     };
     Ok(api_temps)

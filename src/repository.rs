@@ -4,7 +4,7 @@ use std::{collections::HashSet, ops::Div};
 
 use anyhow::anyhow;
 use chrono::{Duration, NaiveDateTime, TimeDelta, Utc};
-use sqlx::{PgPool, Pool, Postgres, postgres::types::PgInterval, types::BigDecimal};
+use sqlx::{PgPool, Pool, Postgres, Row, postgres::{PgRow, types::PgInterval}, prelude::FromRow, types::BigDecimal};
 
 pub async fn start_sql_query(
     pool: &Pool<Postgres>,
@@ -417,33 +417,140 @@ pub async fn find_sensor_temperature_measures_by_timerange(
         Err(e) => Err(e.into()),
     }
 }
+    const MIN_MAX_SQL_1 : &'static str = "
+        SELECT MIN(t.measure_time) min_ts, MAX(t.measure_time) max_ts
+        FROM 
+        ";
+    const MIN_MAX_SQL_2 : &'static str = "
+         t WHERE t.sensor_id = $1
+        ";
+
+    const SELECT_MIN_MAX_TEMP_SQL : &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "temperatures", MIN_MAX_SQL_2);
+    const SELECT_MIN_MAX_HUM_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "humidities", MIN_MAX_SQL_2);
+    const SELECT_MIN_MAX_AIRP_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "air_pressures", MIN_MAX_SQL_2);
+    const SELECT_MIN_MAX_BATVOLT_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "battery_voltages", MIN_MAX_SQL_2);
+
+    const SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1 : &'static str = "
+        SELECT d::timestamp timestamp_from, avg(m.";
+
+    const SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2 : &'static str = "
+        ) avg_measurement
+        FROM ";
+    const SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3 : &'static str = "
+         m
+        INNER JOIN generate_series(
+            $2::timestamp, $3::timestamp, $4::interval
+        ) d
+        ON m.measure_time >= d::timestamp AND m.measure_time <= d::timestamp + $4 
+        WHERE 
+            m.sensor_id = $1
+            AND m.measure_time >= $2 AND m.measure_time <= $3
+        GROUP BY d::timestamp ORDER BY d::timestamp desc
+        ";
+
+    const SELECT_AVG_TEMP_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(
+        SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "temp_celsius", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "temperatures", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3);
+    const SELECT_AVG_HUM_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "humidity_percent", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "humidities", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3);
+    const SELECT_AVG_AIRP_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "air_pressure_pa", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "air_pressures", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3, );
+    const SELECT_AVG_BATVOLT_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "battery_volt",SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "battery_voltages", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3);
+
+#[derive(FromRow)]
+pub struct MinTsMaxTs{
+    min_ts: Option<NaiveDateTime>,
+    max_ts: Option<NaiveDateTime>
+}
+
+#[derive(FromRow)]
+pub struct AvgMeasureTimeInterval{
+    pub timestamp_from: NaiveDateTime,
+    pub avg_measurement: BigDecimal
+}
 
 const MAX_INTERVAL_NUM: u64= 10_000;
 
-//TODO: improve performance, add safe guards, max min start end datetimes
-//TODO: add better errors with specific enum
-pub async fn find_sensor_avg_temperature_measures_by_intervals_in_timerange(
+pub async fn find_sensor_avg_temperatures_by_intervals_in_timerange(
     pool: &PgPool,
     sensor_id: i32,
     start_datetime: &chrono::DateTime<Utc>,
     end_datetime: &chrono::DateTime<Utc>,
     interval: TimeDelta
-) -> std::result::Result<Vec<(NaiveDateTime, BigDecimal)>, Box<dyn std::error::Error>> {
+) -> anyhow::Result<Vec<AvgMeasureTimeInterval>> {
+    find_sensor_avg_simple_measures_by_intervals_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime, interval, 
+        SELECT_MIN_MAX_TEMP_SQL, 
+        SELECT_AVG_TEMP_INTERVALS_IN_TS_RANGE_SQL
+    ).await
+}
+
+pub async fn find_sensor_avg_humidities_by_intervals_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+    interval: TimeDelta
+) -> anyhow::Result<Vec<AvgMeasureTimeInterval>> {
+    find_sensor_avg_simple_measures_by_intervals_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime, interval, 
+        SELECT_MIN_MAX_HUM_SQL, 
+        SELECT_AVG_HUM_INTERVALS_IN_TS_RANGE_SQL
+    ).await
+}
+
+pub async fn find_sensor_avg_airpressures_by_intervals_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+    interval: TimeDelta
+) -> anyhow::Result<Vec<AvgMeasureTimeInterval>> {
+    find_sensor_avg_simple_measures_by_intervals_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime, interval, 
+        SELECT_MIN_MAX_AIRP_SQL, 
+        SELECT_AVG_AIRP_INTERVALS_IN_TS_RANGE_SQL
+    ).await
+}
+
+pub async fn find_sensor_avg_battvolt_by_intervals_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+    interval: TimeDelta
+) -> anyhow::Result<Vec<AvgMeasureTimeInterval>> {
+    find_sensor_avg_simple_measures_by_intervals_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime, interval, 
+        SELECT_MIN_MAX_BATVOLT_SQL, 
+        SELECT_AVG_BATVOLT_INTERVALS_IN_TS_RANGE_SQL
+    ).await
+}
+
+//TODO: improve performance, add safe guards, max min start end datetimes
+//TODO: add better errors with specific enum
+pub async fn find_sensor_avg_simple_measures_by_intervals_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+    interval: TimeDelta,
+    min_max_ts_sql: &'static str,
+    select_interval_in_ts: &'static str
+) -> anyhow::Result<Vec<AvgMeasureTimeInterval>> {
+    let interval_mill_secs = interval.num_milliseconds();
+    if interval_mill_secs == 0 {
+        return Err(anyhow!("Interval cannot be zero."));
+    }
     let interval_count = ((*end_datetime - start_datetime).num_milliseconds() / interval.num_milliseconds()).unsigned_abs();
     if interval_count > MAX_INTERVAL_NUM{
-        return Err(anyhow!("Number of intervals between start and end timestamp is above maximum of 10.000.").into());
+        return Err(anyhow!("Number of intervals between start and end timestamp is above maximum of 10.000."));
     }
     let interval : PgInterval = interval.try_into()
         .map_err(|e| anyhow!("Invalid interval was supplied: {}", e))?;
 
-    let min_max_ts  = sqlx::query!(
-        r#"
-        SELECT MIN(t.measure_time) min_ts, MAX(t.measure_time) max_ts
-        FROM temperatures t WHERE t.sensor_id = $1
-        "#, sensor_id
-    ).fetch_one(pool).await?;
+    let min_max_ts  = sqlx::query_as::<_, MinTsMaxTs>(min_max_ts_sql)
+        .bind(sensor_id)
+    .fetch_one(pool).await?;
 
-    let (min_ts, max_ts) = 
+    let (start_datetime, end_datetime) = 
     if let (Some(min_ts), Some(max_ts)) = (min_max_ts.min_ts, min_max_ts.max_ts){
         (
             start_datetime.naive_utc().clamp(min_ts, max_ts), 
@@ -451,29 +558,14 @@ pub async fn find_sensor_avg_temperature_measures_by_intervals_in_timerange(
         )
     }
     else{
-        return Err(anyhow!("No entries found!").into());
+        return Err(anyhow!("No entries found!"));
     };
 
-    match sqlx::query!(
-        r#"
-        SELECT d::timestamp temp_from, avg(t.temp_celsius) avg_temp
-        FROM temperatures t 
-        INNER JOIN generate_series(
-            $2::timestamp, $3::timestamp, $4::interval
-        ) d
-        ON t.measure_time >= d::timestamp AND measure_time <= d::timestamp + $4 
-        WHERE 
-            t.sensor_id = $1
-            AND measure_time >= $2 AND measure_time <= $3
-        GROUP BY d::timestamp ORDER BY d::timestamp desc
-        "#,
-        sensor_id,
-        min_ts,
-        max_ts,
-        interval
-    )
-        //NOTE: unwrap, query should not be able to return null values
-        .map(|r| (r.temp_from.unwrap(), r.avg_temp.unwrap()))
+    match sqlx::query_as::<_, AvgMeasureTimeInterval>(select_interval_in_ts)
+        .bind(sensor_id)
+        .bind(start_datetime)
+        .bind(end_datetime)
+        .bind(interval)
     .fetch_all(pool)
     .await
     {

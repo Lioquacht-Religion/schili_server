@@ -7,6 +7,7 @@ use actix_web::{
     web::{self, ThinData},
 };
 use anyhow::anyhow;
+use log::error;
 use sqlx::{Pool, Postgres};
 
 use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange};
@@ -32,7 +33,7 @@ pub async fn start_http_server() -> std::io::Result<()> {
             .service(post_temperature_all)
             .service(get_sensor_temperatures_all)
             .service(get_sensor_temperatures_range)
-            .service(get_sensor_avg_temperatures_interval_in_range)
+            .service(get_sensor_avg_simple_measurement_interval_in_range)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
@@ -126,12 +127,35 @@ async fn get_sensor_temperatures_range(
     }
 }
 
-#[get("/sensor/temperature/avg/interval/range/{sensor_reference}/{start_datetime}/{end_datetime}/{interval}")]
-async fn get_sensor_avg_temperatures_interval_in_range(
-    path: web::Path<(String, i64, i64, i64)>,
+pub enum MeasurementKinds{
+    Temperature,
+    Humidity,
+    AirPressure,
+    Co2,
+    BatteryVoltage,
+}
+
+impl TryFrom<&str> for MeasurementKinds{
+    type Error = ();
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+    "temperature" => Ok(MeasurementKinds::Temperature),
+    "humidity" => Ok(MeasurementKinds::Humidity),
+    "airpressure" => Ok(MeasurementKinds::AirPressure),
+    "co2" => Ok(MeasurementKinds::Co2),
+    "batteryvoltage" => Ok(MeasurementKinds::BatteryVoltage),
+    _ => Err(()),
+        }
+    }
+}
+
+#[get("/sensor/measurement/avg/interval/range/{measurement_kind}/{sensor_reference}/{start_datetime}/{end_datetime}/{interval}")]
+async fn get_sensor_avg_simple_measurement_interval_in_range(
+    path: web::Path<(String, String, i64, i64, i64)>,
     ThinData(pool): web::ThinData<Pool<Postgres>>,
 ) -> actix_web::Result<impl Responder, ApiError> {
-    let (sensor_ref, start, end, interval) = path.into_inner();
+    let (measurement_kind, sensor_ref, start, end, interval) = path.into_inner();
+    let measurement_kind = MeasurementKinds::try_from(measurement_kind.as_str()).map_err(|_| anyhow!("Measurement kind does not exist: {}", measurement_kind.as_str()))?;
     let start_datetime = chrono::DateTime::from_timestamp(start, 0);
     let end_datetime = chrono::DateTime::from_timestamp(end, 0);
     let interval = chrono::TimeDelta::minutes(interval);
@@ -150,8 +174,11 @@ async fn get_sensor_avg_temperatures_interval_in_range(
             )))));
         };
 
-    match service::get_sensor_avg_temperatures_by_intervals_in_range(&pool, &temp_range).await {
+    match service::get_sensor_avg_measurements_by_intervals_in_range(&pool, &temp_range, measurement_kind).await {
         Ok(api_temps) => Ok(web::Json(api_temps)),
-        Err(e) => Err(ApiError::from(e)),
+        Err(e) => {
+            error!("Error while trying to search for intervals in timerange: {}", e);
+            Err(ApiError::from(e))
+        }
     }
 }
