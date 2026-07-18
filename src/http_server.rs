@@ -30,8 +30,9 @@ pub async fn start_http_server() -> std::io::Result<()> {
             .app_data(web::ThinData(pool.clone()))
             .service(web::scope("/app").route("/index.html", web::get().to(index)))
             .service(post_sensor)
+            .service(get_sensor)
+            .service(get_all_sensors_filtered)
             .service(post_temperature_all)
-            .service(get_sensor_temperatures_all)
             .service(get_sensor_temperatures_range)
             .service(get_sensor_avg_simple_measurement_interval_in_range)
     })
@@ -64,6 +65,29 @@ async fn post_sensor(
     ))
 }
 
+#[get("/sensor/{sensor_ref}")]
+async fn get_sensor(
+    ThinData(pool): web::ThinData<Pool<Postgres>>,
+    path: web::Path<String>,
+) -> actix_web::Result<impl Responder, ApiError> {
+    let sensor_ref = path.into_inner();
+    let sensor = service::get_sensor(&pool, &sensor_ref).await?;
+    Ok(web::Json(sensor))
+}
+
+#[actix_web::post("/sensor/filtered/{sensor_name_part}")]
+async fn get_all_sensors_filtered(
+    ThinData(pool): web::ThinData<Pool<Postgres>>,
+    path: web::Path<String>,
+    api_sensor_types: web::Json<Vec<api::SensorType>>,
+) -> actix_web::Result<impl Responder, ApiError> {
+    let sensor_name_filter = format!("%{}%", path.into_inner());
+    let sensor = service::get_all_sensors_filtered(
+        &pool, &sensor_name_filter, &api_sensor_types
+    ).await?;
+    Ok(web::Json(sensor))
+}
+
 #[post("/sensor/temperature/add/all")]
 async fn post_temperature_all(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
@@ -82,19 +106,6 @@ async fn post_humidity_all(
 ) -> actix_web::Result<impl Responder, ApiError> {
     match service::insert_temperatures_all(&pool, &api_temp_measures).await {
         Ok(()) => Ok("Added sensor humidity measurements."),
-        Err(e) => Err(ApiError::from(e)),
-    }
-}
-
-#[get("/sensor/temperature/{sensor_reference}")]
-#[deprecated]
-async fn get_sensor_temperatures_all(
-    path: web::Path<(String,)>,
-    ThinData(pool): web::ThinData<Pool<Postgres>>,
-) -> actix_web::Result<impl Responder, ApiError> {
-    let (sensor_ref,) = &path.into_inner();
-    match service::get_sensor_temperatures_all(&pool, sensor_ref.to_owned()).await {
-        Ok(api_temps) => Ok(web::Json(api_temps)),
         Err(e) => Err(ApiError::from(e)),
     }
 }

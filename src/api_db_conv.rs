@@ -32,19 +32,45 @@ impl ModelFrom<&api::SensorType> for repository::SensorType {
             api::SensorType::Temperature => repository::SensorType::Temperature,
             api::SensorType::Humidity => repository::SensorType::Humidity,
             api::SensorType::Airpressure => repository::SensorType::Airpressure,
+            api::SensorType::BatteryVoltage => repository::SensorType::BatteryVoltage,
+            api::SensorType::ChipTemperature => repository::SensorType::ChipTemperature,
             api::SensorType::Co2 => repository::SensorType::Co2,
+        }
+    }
+}
+
+impl ModelFrom<&repository::SensorType> for api::SensorType {
+    fn model_from(value: &repository::SensorType) -> Self {
+        match value {
+            repository::SensorType::Temperature => api::SensorType::Temperature,
+            repository::SensorType::Humidity => api::SensorType::Humidity,
+            repository::SensorType::Airpressure => api::SensorType::Airpressure,
+            repository::SensorType::BatteryVoltage => api::SensorType::BatteryVoltage,
+            repository::SensorType::ChipTemperature => api::SensorType::ChipTemperature,
+            repository::SensorType::Co2 => api::SensorType::Co2,
         }
     }
 }
 
 impl ModelFrom<&api::Sensor> for repository::Sensor {
     fn model_from(value: &api::Sensor) -> Self {
-        let sensor_types: HashSet<repository::SensorType> = value
+        let sensor_types: Vec<repository::SensorType> = value
             .sensor_types
             .iter()
             .map(|st| st.model_into())
             .collect();
         repository::Sensor::new(&value.reference, &value.name, sensor_types)
+    }
+}
+
+impl ModelFrom<&repository::Sensor> for api::Sensor {
+    fn model_from(value: &repository::Sensor) -> Self {
+        let sensor_types: HashSet<api::SensorType> = value
+            .sensor_types
+            .iter()
+            .map(|st| st.model_into())
+            .collect();
+        api::Sensor::new(&value.sensor_reference, &value.sensor_name, sensor_types)
     }
 }
 

@@ -9,7 +9,7 @@ use sqlx::{Pool, Postgres};
 
 use crate::{
     api_db_conv::ModelInto, config, email, http_server::MeasurementKinds, repository::{
-        self, AirPressure, AvgMeasureTimeInterval, BatteryVoltage, ChipTemperature, DBSimpleMeasurement, Humidity, Temperature
+        self, AirPressure, AvgMeasureTimeInterval, BatteryVoltage, ChipTemperature, DBSimpleMeasurement, Humidity, SensorType, Temperature
     }
 };
 
@@ -30,6 +30,43 @@ pub async fn add_sensor(
         })?;
     Ok(db_sensor)
 }
+
+pub async fn get_sensor(
+    pool: &Pool<Postgres>,
+    sensor_ref: &str,
+) -> anyhow::Result<api::Sensor> {
+    let db_sensor = repository::find_sensor_and_types_by_ref(&pool, sensor_ref)
+        .await
+        .map_err(|e| {
+            anyhow!(
+                "Sensor with reference='{sensor_ref}' could not be found. Error: {e}",
+            )
+        })?;
+    let api_sensor: api::Sensor = (&db_sensor).model_into();
+    Ok(api_sensor)
+}
+
+pub async fn get_all_sensors_filtered(
+    pool: &Pool<Postgres>,
+    sensor_name_part: &str,
+    sensor_types: &[api::SensorType]
+) -> anyhow::Result<Vec<api::Sensor>> {
+    let sensor_types: Vec<repository::SensorType> = sensor_types.iter().map(|st| st.model_into())
+        .collect();
+    let db_sensors = repository::find_all_sensors_with_filter(&pool, sensor_name_part, &sensor_types)
+        .await
+        .map_err(|e| {
+            anyhow!(
+                "Sensors with search string='{}' could not be found. Error: {}",
+                sensor_name_part, e
+            )
+        })?;
+    let api_sensors = db_sensors.iter()
+        .map(|s| s.model_into())
+        .collect();
+    Ok(api_sensors)
+}
+
 
 // ++++++++++++++ Temperature - SECTION +++++++++++++++++++++
 
@@ -205,32 +242,6 @@ pub async fn insert_temperatures_all(
         })?;
 
     Ok(())
-}
-
-#[deprecated]
-pub async fn get_sensor_temperatures_all(
-    pool: &Pool<Postgres>,
-    sensor_ref: String,
-) -> anyhow::Result<api::SensorSimpleMeasurements> {
-    let sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "Sensor with reference='{}' could not be found.",
-                &sensor_ref
-            )
-        })?;
-    let temps = repository::find_sensor_temperature_measures(&pool, sensor.sensor_id)
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "Error fetching temperature measurements for sensor with reference='{}'.",
-                &sensor_ref
-            )
-        })?;
-    let sensor_temps = (sensor_ref.to_owned(), temps);
-    let api_temps: api::SensorSimpleMeasurements = sensor_temps.model_into();
-    Ok(api_temps)
 }
 
 pub async fn get_sensor_temperatures_in_range(

@@ -1,9 +1,9 @@
 // repository.rs
 
-use std::{collections::HashSet, ops::Div};
+use std::str::FromStr;
 
 use anyhow::anyhow;
-use chrono::{Duration, NaiveDateTime, TimeDelta, Utc};
+use chrono::{NaiveDateTime, TimeDelta, Utc};
 use sqlx::{PgPool, Pool, Postgres, Row, postgres::{PgRow, types::PgInterval}, prelude::FromRow, types::BigDecimal};
 
 pub async fn start_sql_query(
@@ -20,20 +20,57 @@ pub async fn start_sql_query(
     Ok(())
 }
 
+#[derive(Debug, FromRow)]
 pub struct Sensor {
     pub sensor_id: i32,
     pub sensor_reference: String,
     pub sensor_name: String,
-    pub sensor_types: HashSet<SensorType>,
+    pub sensor_types: Vec<SensorType>,
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type)]
+#[sqlx(type_name = "sensor_type", rename_all = "lowercase")]
 pub enum SensorType {
     Temperature,
     Humidity,
     Airpressure,
     Co2,
+    BatteryVoltage,
     ChipTemperature,
+}
+
+impl<'r> FromRow<'r, PgRow> for SensorType{
+    fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
+        row.try_get(0)
+    }
+}
+
+impl From<&SensorType> for &str {
+    fn from(value: &SensorType) -> Self {
+        match value {
+            SensorType::Temperature => "temperature",
+            SensorType::Humidity => "humidity",
+            SensorType::Airpressure => "airpressure",
+            SensorType::ChipTemperature => "chiptemperature",
+            SensorType::BatteryVoltage => "BatteryVoltage",
+            SensorType::Co2 => "co2",
+        }
+    }
+}
+
+impl FromStr for SensorType{
+    type Err = ();
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+             "temperature"=> Ok(SensorType::Temperature),
+             "humidity"=> Ok(SensorType::Humidity),
+             "airpressure"=> Ok(SensorType::Airpressure),
+             "chiptemperature"=> Ok(SensorType::ChipTemperature),
+             "BatteryVoltage"=> Ok(SensorType::BatteryVoltage),
+             "co2"=> Ok(SensorType::Co2),
+             _ => Err(()),
+        }
+    }
 }
 
 pub trait DBSimpleMeasurement {
@@ -151,7 +188,7 @@ impl Sensor {
         id: i32,
         reference: &str,
         name: &str,
-        sensor_types: HashSet<SensorType>,
+        sensor_types: Vec<SensorType>,
     ) -> Self {
         Self {
             sensor_id: id,
@@ -161,20 +198,8 @@ impl Sensor {
         }
     }
 
-    pub fn new(reference: &str, name: &str, sensor_types: HashSet<SensorType>) -> Self {
+    pub fn new(reference: &str, name: &str, sensor_types: Vec<SensorType>) -> Self {
         Self::new_with_id(0, reference, name, sensor_types)
-    }
-}
-
-impl From<&SensorType> for &str {
-    fn from(value: &SensorType) -> Self {
-        match value {
-            SensorType::Temperature => "temperature",
-            SensorType::Humidity => "humidity",
-            SensorType::Airpressure => "airpressure",
-            SensorType::Co2 => "co2",
-            SensorType::ChipTemperature => "chiptemperature",
-        }
     }
 }
 
@@ -293,7 +318,7 @@ pub async fn insert_sensor_with_sensor_types(
 pub async fn find_sensor_by_ref(
     pool: &PgPool,
     sensor_ref: &str,
-) -> std::result::Result<Sensor, Box<dyn std::error::Error>> {
+) -> anyhow::Result<Sensor> {
     match sqlx::query!(
         r#"
         SELECT s.sensor_id, s.sensor_name 
@@ -310,11 +335,60 @@ pub async fn find_sensor_by_ref(
             rec.sensor_id,
             sensor_ref,
             &rec.sensor_name,
-            HashSet::new(),
+            Vec::new(),
         )),
         Err(e) => Err(e.into()),
     }
 }
+
+pub async fn find_sensor_and_types_by_ref(
+    pool: &PgPool,
+    sensor_ref: &str,
+) -> anyhow::Result<Sensor> {
+    let mut sensor = find_sensor_by_ref(pool, sensor_ref).await?;
+    let sensor_types: Vec<SensorType> = sqlx::query_as(
+        r#"
+        SELECT stl.sensor_type
+        FROM sensor_types_link stl
+        WHERE stl.sensor_id = $1
+        ORDER BY stl.sensor_type
+    "#
+    )
+        .bind(sensor.sensor_id)
+        .fetch_all(pool)
+        .await?;
+    sensor.sensor_types = sensor_types.into_iter().collect();
+    Ok(sensor)
+}
+
+pub async fn find_all_sensors_with_filter(
+    pool: &PgPool,
+    sensor_name_part: &str,
+    sensor_types: &[SensorType]
+) -> anyhow::Result<Vec<Sensor>> {
+    let sensors = sqlx::query_as(
+        r#"
+        SELECT s1.sensor_id, s1.sensor_reference, s1.sensor_name, 
+            s2.sensor_types as "sensor_types"
+        FROM sensors s1 
+        JOIN (
+            SELECT s.sensor_id, coalesce(array_agg(st.sensor_type), 
+                array[]::sensor_type[]) AS sensor_types 
+            FROM sensors s 
+            LEFT JOIN sensor_types_link st ON s.sensor_id = st.sensor_id 
+            WHERE s.sensor_name LIKE $1
+            GROUP BY s.sensor_id) s2
+        ON s1.sensor_id = s2.sensor_id
+        AND s2.sensor_types @> $2::sensor_type[]
+        "#
+    )
+        .bind(sensor_name_part)
+        .bind(sensor_types)
+        .fetch_all(pool)
+        .await?;
+    Ok(sensors)
+}
+
 
 // ++++++++++++++ Temperature - SECTION +++++++++++++++++++++
 
@@ -366,29 +440,6 @@ pub async fn insert_single_sensor_temperature(
     temperature.temperature_id = temperature_id.temperature_id;
 
     Ok(())
-}
-
-#[deprecated]
-pub async fn find_sensor_temperature_measures(
-    pool: &PgPool,
-    sensor_id: i32,
-) -> std::result::Result<Vec<Temperature>, Box<dyn std::error::Error>> {
-    match sqlx::query_as!(
-        Temperature,
-        r#"
-        SELECT t.temperature_id, s.sensor_id, t.temp_celsius, t.measure_time
-        FROM sensors s 
-        LEFT JOIN temperatures t ON s.sensor_id = t.sensor_id
-        WHERE s.sensor_id = $1
-    "#,
-        sensor_id
-    )
-    .fetch_all(pool)
-    .await
-    {
-        Ok(temps) => Ok(temps),
-        Err(e) => Err(e.into()),
-    }
 }
 
 pub async fn find_sensor_temperature_measures_by_timerange(
