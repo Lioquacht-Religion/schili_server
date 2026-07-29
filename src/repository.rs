@@ -361,6 +361,30 @@ pub async fn find_sensor_and_types_by_ref(
     Ok(sensor)
 }
 
+pub async fn find_all_sensors(
+    pool: &PgPool,
+) -> anyhow::Result<Vec<Sensor>> {
+    let sensors = sqlx::query_as(
+        r#"
+        SELECT s1.sensor_id, s1.sensor_reference, s1.sensor_name, 
+            CASE WHEN s2.sensor_types = '{null}'::sensor_type[]
+                THEN array[]::sensor_type[]
+                ELSE s2.sensor_types
+            END AS sensor_types
+        FROM sensors s1 
+        JOIN (
+            SELECT s.sensor_id, array_agg(st.sensor_type) AS sensor_types 
+            FROM sensors s 
+            LEFT JOIN sensor_types_link st ON s.sensor_id = st.sensor_id 
+            GROUP BY s.sensor_id) s2
+        ON s1.sensor_id = s2.sensor_id
+        "#
+    )
+        .fetch_all(pool)
+        .await?;
+    Ok(sensors)
+}
+
 pub async fn find_all_sensors_with_filter(
     pool: &PgPool,
     sensor_name_part: &str,
@@ -468,18 +492,25 @@ pub async fn find_sensor_temperature_measures_by_timerange(
         Err(e) => Err(e.into()),
     }
 }
+
+//TODO: optimize by checking for current min date eq gt user spec start date
+//TODO: optimize by checking for current max date eq lt user spec end date
     const MIN_MAX_SQL_1 : &'static str = "
         SELECT MIN(t.measure_time) min_ts, MAX(t.measure_time) max_ts
         FROM 
         ";
     const MIN_MAX_SQL_2 : &'static str = "
          t WHERE t.sensor_id = $1
+         AND t.measure_time >= $2
+         AND t.measure_time <= $3
         ";
 
     const SELECT_MIN_MAX_TEMP_SQL : &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "temperatures", MIN_MAX_SQL_2);
     const SELECT_MIN_MAX_HUM_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "humidities", MIN_MAX_SQL_2);
     const SELECT_MIN_MAX_AIRP_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "air_pressures", MIN_MAX_SQL_2);
     const SELECT_MIN_MAX_BATVOLT_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "battery_voltages", MIN_MAX_SQL_2);
+    const SELECT_MIN_MAX_CHIPTEMP_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "chip_temperatures", MIN_MAX_SQL_2);
+
 
     const SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1 : &'static str = "
         SELECT d::timestamp timestamp_from, avg(m.";
@@ -504,6 +535,7 @@ pub async fn find_sensor_temperature_measures_by_timerange(
     const SELECT_AVG_HUM_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "humidity_percent", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "humidities", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3);
     const SELECT_AVG_AIRP_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "air_pressure_pa", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "air_pressures", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3, );
     const SELECT_AVG_BATVOLT_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "battery_volt",SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "battery_voltages", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3);
+    const SELECT_AVG_CHIPTEMP_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "temp_celsius",SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "chip_temperatures", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3);
 
 #[derive(FromRow)]
 pub struct MinTsMaxTs{
@@ -575,6 +607,20 @@ pub async fn find_sensor_avg_battvolt_by_intervals_in_timerange(
     ).await
 }
 
+pub async fn find_sensor_avg_chip_temperature_by_intervals_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+    interval: TimeDelta
+) -> anyhow::Result<Vec<AvgMeasureTimeInterval>> {
+    find_sensor_avg_simple_measures_by_intervals_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime, interval, 
+        SELECT_MIN_MAX_CHIPTEMP_SQL, 
+        SELECT_AVG_CHIPTEMP_INTERVALS_IN_TS_RANGE_SQL
+    ).await
+}
+
 //TODO: improve performance, add safe guards, max min start end datetimes
 //TODO: add better errors with specific enum
 pub async fn find_sensor_avg_simple_measures_by_intervals_in_timerange(
@@ -592,13 +638,15 @@ pub async fn find_sensor_avg_simple_measures_by_intervals_in_timerange(
     }
     let interval_count = ((*end_datetime - start_datetime).num_milliseconds() / interval.num_milliseconds()).unsigned_abs();
     if interval_count > MAX_INTERVAL_NUM{
-        return Err(anyhow!("Number of intervals between start and end timestamp is above maximum of 10.000."));
+        return Err(anyhow!("Number of intervals between start and end timestamp is above maximum of 10.000. Interval: {interval_count}"));
     }
     let interval : PgInterval = interval.try_into()
         .map_err(|e| anyhow!("Invalid interval was supplied: {}", e))?;
 
     let min_max_ts  = sqlx::query_as::<_, MinTsMaxTs>(min_max_ts_sql)
         .bind(sensor_id)
+        .bind(start_datetime)
+        .bind(end_datetime)
     .fetch_one(pool).await?;
 
     let (start_datetime, end_datetime) = 

@@ -18,9 +18,16 @@ pub async fn get_config() -> &'static Config {
 
 #[derive(Deserialize)]
 pub struct Config {
+    pub http_service: HttpServiceConfig,
     database: DBConfig,
     pub mqtt: MQTTConfig,
     pub email: EmailConfig,
+}
+
+#[derive(Deserialize)]
+pub struct HttpServiceConfig {
+    pub(crate) host: String,
+    pub(crate) port: u16,
 }
 
 #[derive(Deserialize)]

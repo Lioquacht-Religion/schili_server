@@ -1,5 +1,7 @@
 // http_server.rs
 
+use std::str::FromStr;
+
 use actix_web::{
     App, HttpServer, Responder, get,
     middleware::Logger,
@@ -10,16 +12,15 @@ use anyhow::anyhow;
 use log::error;
 use sqlx::{Pool, Postgres};
 
-use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange};
+use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SensorType};
 
 use crate::{
-    database,
-    error::{ApiError, DateRangeError},
-    service::{self},
+    config, database, error::{ApiError, DateRangeError}, service::{self}
 };
 
 pub async fn start_http_server() -> std::io::Result<()> {
     let pool = database::create_db_pool().await;
+    let config = config::get_config().await;
 
     HttpServer::new(move || {
         App::new()
@@ -31,12 +32,13 @@ pub async fn start_http_server() -> std::io::Result<()> {
             .service(web::scope("/app").route("/index.html", web::get().to(index)))
             .service(post_sensor)
             .service(get_sensor)
+            .service(get_all_sensors)
             .service(get_all_sensors_filtered)
             .service(post_temperature_all)
             .service(get_sensor_temperatures_range)
             .service(get_sensor_avg_simple_measurement_interval_in_range)
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind((config.http_service.host.as_str(), config.http_service.port))?
     .run()
     .await
 }
@@ -65,7 +67,7 @@ async fn post_sensor(
     ))
 }
 
-#[get("/sensor/{sensor_ref}")]
+#[get("/sensor/reference/{sensor_ref}")]
 async fn get_sensor(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
     path: web::Path<String>,
@@ -73,6 +75,14 @@ async fn get_sensor(
     let sensor_ref = path.into_inner();
     let sensor = service::get_sensor(&pool, &sensor_ref).await?;
     Ok(web::Json(sensor))
+}
+
+#[get("/sensor/all")]
+async fn get_all_sensors(
+    ThinData(pool): web::ThinData<Pool<Postgres>>,
+) -> actix_web::Result<impl Responder, ApiError> {
+    let sensors = service::get_all_sensors(&pool).await?;
+    Ok(web::Json(sensors))
 }
 
 #[actix_web::post("/sensor/filtered/{sensor_name_part}")]
@@ -138,38 +148,16 @@ async fn get_sensor_temperatures_range(
     }
 }
 
-pub enum MeasurementKinds{
-    Temperature,
-    Humidity,
-    AirPressure,
-    Co2,
-    BatteryVoltage,
-}
-
-impl TryFrom<&str> for MeasurementKinds{
-    type Error = ();
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-    "temperature" => Ok(MeasurementKinds::Temperature),
-    "humidity" => Ok(MeasurementKinds::Humidity),
-    "airpressure" => Ok(MeasurementKinds::AirPressure),
-    "co2" => Ok(MeasurementKinds::Co2),
-    "batteryvoltage" => Ok(MeasurementKinds::BatteryVoltage),
-    _ => Err(()),
-        }
-    }
-}
-
 #[get("/sensor/measurement/avg/interval/range/{measurement_kind}/{sensor_reference}/{start_datetime}/{end_datetime}/{interval}")]
 async fn get_sensor_avg_simple_measurement_interval_in_range(
     path: web::Path<(String, String, i64, i64, i64)>,
     ThinData(pool): web::ThinData<Pool<Postgres>>,
 ) -> actix_web::Result<impl Responder, ApiError> {
     let (measurement_kind, sensor_ref, start, end, interval) = path.into_inner();
-    let measurement_kind = MeasurementKinds::try_from(measurement_kind.as_str()).map_err(|_| anyhow!("Measurement kind does not exist: {}", measurement_kind.as_str()))?;
+    let measurement_kind = SensorType::from_str(&measurement_kind).map_err(|_| anyhow!("Measurement kind does not exist: {}", measurement_kind.as_str()))?;
     let start_datetime = chrono::DateTime::from_timestamp(start, 0);
     let end_datetime = chrono::DateTime::from_timestamp(end, 0);
-    let interval = chrono::TimeDelta::minutes(interval);
+    let interval = chrono::TimeDelta::milliseconds(interval);
     let temp_range =
         if let (Some(start_datetime), Some(end_datetime)) = (start_datetime, end_datetime) {
             GetSensorSimpleMeasuresIntervalsRange{

@@ -1,5 +1,9 @@
 # example server configuration file
 
+[http_service]
+host = "localhost" 
+port = 8080
+
 [database]
 connection_string = "postgres://user:password@localhost/database_name"
 
