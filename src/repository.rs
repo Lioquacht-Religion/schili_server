@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use chrono::{NaiveDateTime, TimeDelta, Utc};
+use schili_api::api;
 use sqlx::{PgPool, Pool, Postgres, Row, postgres::{PgRow, types::PgInterval}, prelude::FromRow, types::BigDecimal};
 
 pub async fn start_sql_query(
@@ -77,6 +78,30 @@ pub trait DBSimpleMeasurement {
     fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self;
     fn measurement(&self) -> &BigDecimal;
     fn measure_time(&self) -> NaiveDateTime;
+}
+
+#[derive(Debug, FromRow)]
+pub struct SimpleMeasurement {
+    pub measurement: BigDecimal,
+    pub measure_time: NaiveDateTime,
+}
+
+impl SimpleMeasurement{
+    pub fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self{
+        Self { measurement, measure_time }
+    }
+}
+
+impl DBSimpleMeasurement for SimpleMeasurement{
+    fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self::new(measurement, measure_time)
+    }
+    fn measurement(&self) -> &BigDecimal {
+        &self.measurement
+    }
+    fn measure_time(&self) -> NaiveDateTime {
+        self.measure_time
+    }
 }
 
 pub struct Temperature {
@@ -327,7 +352,6 @@ pub async fn find_sensor_by_ref(
     "#,
         sensor_ref
     )
-    //TODO: maybe better error handling with anyhow crate?
     .fetch_one(pool)
     .await
     {
@@ -466,25 +490,96 @@ pub async fn insert_single_sensor_temperature(
     Ok(())
 }
 
-pub async fn find_sensor_temperature_measures_by_timerange(
+    const SELECT_IN_TS_RANGE_SQL_1 : &'static str = r#"SELECT m."#;
+    const SELECT_IN_TS_RANGE_SQL_2 : &'static str = r#"
+         as measurement, m.measure_time as measure_time
+        FROM sensors s 
+        LEFT JOIN 
+        "#;
+    const SELECT_IN_TS_RANGE_SQL_3 : &'static str = r#"
+         m ON s.sensor_id = m.sensor_id
+        WHERE s.sensor_id = $1
+        AND $2 <= m.measure_time AND m.measure_time <= $3
+        "#;
+
+    const SELECT_TEMP_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(
+        SELECT_IN_TS_RANGE_SQL_1, "temp_celsius", SELECT_IN_TS_RANGE_SQL_2, "temperatures", SELECT_IN_TS_RANGE_SQL_3);
+    const SELECT_HUM_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_IN_TS_RANGE_SQL_1, "humidity_percent", SELECT_IN_TS_RANGE_SQL_2, "humidities", SELECT_IN_TS_RANGE_SQL_3);
+    const SELECT_AIRP_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_IN_TS_RANGE_SQL_1, "air_pressure_pa", SELECT_IN_TS_RANGE_SQL_2, "air_pressures", SELECT_IN_TS_RANGE_SQL_3);
+    const SELECT_BATVOLT_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_IN_TS_RANGE_SQL_1, "battery_volt",SELECT_IN_TS_RANGE_SQL_2, "battery_voltages", SELECT_IN_TS_RANGE_SQL_3);
+    const SELECT_CHIPTEMP_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_IN_TS_RANGE_SQL_1, "temp_celsius",SELECT_IN_TS_RANGE_SQL_2, "chip_temperatures", SELECT_IN_TS_RANGE_SQL_3);
+
+pub async fn find_sensor_temperatures_in_timerange(
     pool: &PgPool,
     sensor_id: i32,
     start_datetime: &chrono::DateTime<Utc>,
     end_datetime: &chrono::DateTime<Utc>,
-) -> std::result::Result<Vec<Temperature>, Box<dyn std::error::Error>> {
-    match sqlx::query_as!(
-        Temperature,
-        r#"
-        SELECT t.temperature_id, s.sensor_id, t.temp_celsius, t.measure_time
-        FROM sensors s 
-        LEFT JOIN temperatures t ON s.sensor_id = t.sensor_id
-        WHERE s.sensor_id = $1
-        AND $2 <= t.measure_time AND t.measure_time <= $3
-    "#,
-        sensor_id,
-        start_datetime.naive_utc(),
-        end_datetime.naive_utc()
-    )
+) -> anyhow::Result<Vec<SimpleMeasurement>> {
+    find_sensor_simple_measures_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime,
+        SELECT_TEMP_IN_TS_RANGE_SQL
+    ).await
+}
+
+pub async fn find_sensor_humidities_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+) -> anyhow::Result<Vec<SimpleMeasurement>> {
+    find_sensor_simple_measures_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime,
+        SELECT_HUM_IN_TS_RANGE_SQL
+    ).await
+}
+
+pub async fn find_sensor_airpressures_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+) -> anyhow::Result<Vec<SimpleMeasurement>> {
+    find_sensor_simple_measures_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime,
+        SELECT_AIRP_IN_TS_RANGE_SQL
+    ).await
+}
+
+pub async fn find_sensor_batteryvolt_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+) -> anyhow::Result<Vec<SimpleMeasurement>> {
+    find_sensor_simple_measures_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime,
+        SELECT_BATVOLT_IN_TS_RANGE_SQL
+    ).await
+}
+
+pub async fn find_sensor_chiptemperature_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+) -> anyhow::Result<Vec<SimpleMeasurement>> {
+    find_sensor_simple_measures_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime,
+        SELECT_CHIPTEMP_IN_TS_RANGE_SQL
+    ).await
+}
+
+pub async fn find_sensor_simple_measures_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+    select_in_ts: &'static str,
+) -> anyhow::Result<Vec<SimpleMeasurement>> {
+    match sqlx::query_as::<_, SimpleMeasurement>(select_in_ts)
+        .bind(sensor_id)
+        .bind(start_datetime)
+        .bind(end_datetime)
     .fetch_all(pool)
     .await
     {
@@ -493,8 +588,6 @@ pub async fn find_sensor_temperature_measures_by_timerange(
     }
 }
 
-//TODO: optimize by checking for current min date eq gt user spec start date
-//TODO: optimize by checking for current max date eq lt user spec end date
     const MIN_MAX_SQL_1 : &'static str = "
         SELECT MIN(t.measure_time) min_ts, MAX(t.measure_time) max_ts
         FROM 
@@ -750,33 +843,6 @@ pub async fn insert_single_sensor_humidity(
     Ok(())
 }
 
-pub async fn find_sensor_humidity_measures_by_timerange(
-    pool: &PgPool,
-    sensor_id: i32,
-    start_datetime: &chrono::DateTime<Utc>,
-    end_datetime: &chrono::DateTime<Utc>,
-) -> std::result::Result<Vec<Humidity>, Box<dyn std::error::Error>> {
-    match sqlx::query_as!(
-        Humidity,
-        r#"
-        SELECT h.humidity_id, s.sensor_id, h.humidity_percent, h.measure_time
-        FROM sensors s 
-        LEFT JOIN humidities h ON s.sensor_id = h.sensor_id
-        WHERE s.sensor_id = $1
-        AND $2 <= h.measure_time AND h.measure_time <= $3
-    "#,
-        sensor_id,
-        start_datetime.naive_utc(),
-        end_datetime.naive_utc()
-    )
-    .fetch_all(pool)
-    .await
-    {
-        Ok(hums) => Ok(hums),
-        Err(e) => Err(e.into()),
-    }
-}
-
 // ++++++++++++++ Airpressure - SECTION +++++++++++++++++++++
 
 pub async fn insert_sensor_airpressure_measures(
@@ -827,33 +893,6 @@ pub async fn insert_single_sensor_airpressure(
     air_pressure.air_pressure_id = rec.air_pressure_id;
 
     Ok(())
-}
-
-pub async fn find_sensor_airpressure_measures_by_timerange(
-    pool: &PgPool,
-    sensor_id: i32,
-    start_datetime: &chrono::DateTime<Utc>,
-    end_datetime: &chrono::DateTime<Utc>,
-) -> std::result::Result<Vec<AirPressure>, Box<dyn std::error::Error>> {
-    match sqlx::query_as!(
-        AirPressure,
-        r#"
-        SELECT a.air_pressure_id, s.sensor_id, a.air_pressure_pa, a.measure_time
-        FROM sensors s 
-        LEFT JOIN air_pressures a ON s.sensor_id = a.sensor_id
-        WHERE s.sensor_id = $1
-        AND $2 <= a.measure_time AND a.measure_time <= $3
-    "#,
-        sensor_id,
-        start_datetime.naive_utc(),
-        end_datetime.naive_utc()
-    )
-    .fetch_all(pool)
-    .await
-    {
-        Ok(hums) => Ok(hums),
-        Err(e) => Err(e.into()),
-    }
 }
 
 // ++++++++++++++ Chip temerature - SECTION +++++++++++++++++++++

@@ -259,9 +259,10 @@ pub async fn insert_temperatures_all(
     Ok(())
 }
 
-pub async fn get_sensor_temperatures_in_range(
+pub async fn get_sensor_measurements_in_range(
     pool: &Pool<Postgres>,
     sensor_temp_range: &GetSensorSimpleMeasuresRange,
+    measurement_kind: SensorType
 ) -> anyhow::Result<api::SensorSimpleMeasurements> {
     let sensor = repository::find_sensor_by_ref(&pool, &sensor_temp_range.sensor_reference)
         .await
@@ -271,21 +272,35 @@ pub async fn get_sensor_temperatures_in_range(
                 &sensor_temp_range.sensor_reference,
             )
         })?;
-    let temps = repository::find_sensor_temperature_measures_by_timerange(
-        &pool,
-        sensor.sensor_id,
-        &sensor_temp_range.start_datetime,
-        &sensor_temp_range.end_datetime,
-    )
-    .await
-    .map_err(|_| {
+    let result = match measurement_kind{
+        SensorType::Temperature => repository::find_sensor_temperatures_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime).await,
+        SensorType::Humidity => repository::find_sensor_humidities_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime).await,
+        SensorType::Airpressure => repository::find_sensor_airpressures_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime).await,
+        SensorType::Co2 => todo!(),
+        SensorType::BatteryVoltage => repository::find_sensor_batteryvolt_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime).await,
+        SensorType::ChipTemperature => repository::find_sensor_chiptemperature_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime).await,
+    };
+    let temps = result
+    .map_err(|e| {
         anyhow!(
-            "Error fetching temperature measurements for sensor with reference='{}'.",
+            "Error fetching temperature measurements for sensor with reference='{}'. Error: {e}",
             &sensor_temp_range.sensor_reference
         )
     })?;
-    let sensor_temps = (sensor_temp_range.sensor_reference.to_owned(), temps);
-    let api_temps: api::SensorSimpleMeasurements = sensor_temps.model_into();
+    let api_temps = api::SensorSimpleMeasurements{
+        sensor_reference: sensor.sensor_reference,
+        measurements: temps.into_iter().map(|repository::SimpleMeasurement{
+            measurement, measure_time
+        }| SimpleMeasurement{
+            measure_time: measure_time.and_utc(),
+            measurement,
+        }).collect()
+    };
     Ok(api_temps)
 }
 
@@ -312,7 +327,8 @@ pub async fn get_sensor_avg_measurements_by_intervals_in_range(
         SensorType::Co2 => todo!(),
         SensorType::BatteryVoltage => repository::find_sensor_avg_battvolt_by_intervals_in_timerange(
         &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime,sensor_temp_range.interval).await,
-        SensorType::ChipTemperature => todo!(),
+        SensorType::ChipTemperature => repository::find_sensor_avg_chip_temperature_by_intervals_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime,sensor_temp_range.interval).await,
     };
     let temps = result
     .map_err(|e| {
@@ -380,36 +396,6 @@ pub async fn insert_humidities_all(
     Ok(())
 }
 
-pub async fn get_sensor_humidities_in_range(
-    pool: &Pool<Postgres>,
-    sensor_temp_range: &GetSensorSimpleMeasuresRange,
-) -> anyhow::Result<api::SensorSimpleMeasurements> {
-    let sensor = repository::find_sensor_by_ref(&pool, &sensor_temp_range.sensor_reference)
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "Sensor with reference='{}' could not be found.",
-                &sensor_temp_range.sensor_reference,
-            )
-        })?;
-    let temps = repository::find_sensor_humidity_measures_by_timerange(
-        &pool,
-        sensor.sensor_id,
-        &sensor_temp_range.start_datetime,
-        &sensor_temp_range.end_datetime,
-    )
-    .await
-    .map_err(|_| {
-        anyhow!(
-            "Error fetching humidity measurements for sensor with reference='{}'.",
-            &sensor_temp_range.sensor_reference
-        )
-    })?;
-    let sensor_temps = (sensor_temp_range.sensor_reference.to_owned(), temps);
-    let api_temps: api::SensorSimpleMeasurements = sensor_temps.model_into();
-    Ok(api_temps)
-}
-
 // ++++++++++++++ Airpressure - SECTION +++++++++++++++++++++
 
 pub async fn insert_airpressure<'a>(
@@ -459,36 +445,6 @@ pub async fn insert_airpressure_all(
         })?;
 
     Ok(())
-}
-
-pub async fn get_sensor_airpressure_in_range(
-    pool: &Pool<Postgres>,
-    sensor_temp_range: &GetSensorSimpleMeasuresRange,
-) -> anyhow::Result<api::SensorSimpleMeasurements> {
-    let sensor = repository::find_sensor_by_ref(&pool, &sensor_temp_range.sensor_reference)
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "Sensor with reference='{}' could not be found.",
-                &sensor_temp_range.sensor_reference,
-            )
-        })?;
-    let temps = repository::find_sensor_airpressure_measures_by_timerange(
-        &pool,
-        sensor.sensor_id,
-        &sensor_temp_range.start_datetime,
-        &sensor_temp_range.end_datetime,
-    )
-    .await
-    .map_err(|_| {
-        anyhow!(
-            "Error fetching air pressure measurements for sensor with reference='{}'.",
-            &sensor_temp_range.sensor_reference
-        )
-    })?;
-    let sensor_temps = (sensor_temp_range.sensor_reference.to_owned(), temps);
-    let api_temps: api::SensorSimpleMeasurements = sensor_temps.model_into();
-    Ok(api_temps)
 }
 
 // ++++++++++++++ Chip temperature - SECTION +++++++++++++++++++++

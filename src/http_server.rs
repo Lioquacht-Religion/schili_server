@@ -35,7 +35,7 @@ pub async fn start_http_server() -> std::io::Result<()> {
             .service(get_all_sensors)
             .service(get_all_sensors_filtered)
             .service(post_temperature_all)
-            .service(get_sensor_temperatures_range)
+            .service(get_sensor_measurements_range)
             .service(get_sensor_avg_simple_measurement_interval_in_range)
     })
     .bind((config.http_service.host.as_str(), config.http_service.port))?
@@ -120,12 +120,14 @@ async fn post_humidity_all(
     }
 }
 
-#[get("/sensor/temperature/range/{sensor_reference}/{start_datetime}/{end_datetime}")]
-async fn get_sensor_temperatures_range(
-    path: web::Path<(String, i64, i64)>,
+#[get("/sensor/measurement/range/{measurement_kind}/{sensor_reference}/{start_datetime}/{end_datetime}")]
+async fn get_sensor_measurements_range(
+    path: web::Path<(String, String, i64, i64)>,
     ThinData(pool): web::ThinData<Pool<Postgres>>,
 ) -> actix_web::Result<impl Responder, ApiError> {
-    let (sensor_ref, start, end) = path.into_inner();
+    let (measurement_kind, sensor_ref, start, end) = path.into_inner();
+    let measurement_kind = SensorType::from_str(&measurement_kind)
+        .map_err(|_| anyhow!("Measurement kind does not exist: {}", measurement_kind.as_str()))?;
     let start_datetime = chrono::DateTime::from_timestamp(start, 0);
     let end_datetime = chrono::DateTime::from_timestamp(end, 0);
     let temp_range =
@@ -142,7 +144,7 @@ async fn get_sensor_temperatures_range(
             )))));
         };
 
-    match service::get_sensor_temperatures_in_range(&pool, &temp_range).await {
+    match service::get_sensor_measurements_in_range(&pool, &temp_range, measurement_kind).await {
         Ok(api_temps) => Ok(web::Json(api_temps)),
         Err(e) => Err(ApiError::from(e)),
     }
