@@ -2,11 +2,9 @@
 
 use std::str::FromStr;
 
+use actix_cors::Cors;
 use actix_web::{
-    App, HttpServer, Responder, get,
-    middleware::Logger,
-    post,
-    web::{self, ThinData},
+    App, HttpServer, Responder, get, http, middleware::Logger, post, web::{self, ThinData}
 };
 use anyhow::anyhow;
 use log::error;
@@ -23,8 +21,19 @@ pub async fn start_http_server() -> std::io::Result<()> {
     let config = config::get_config().await;
 
     HttpServer::new(move || {
+        let cors = Cors::default()
+            //.allowed_origin("https://www.rust-lang.org")
+            .allowed_origin("http://192.168.2.226:8090/")
+            .allowed_origin("http://192.168.2.211:8090/")
+            .allowed_methods(vec!["GET", "POST"])
+            .allowed_headers(vec![http::header::AUTHORIZATION, http::header::ACCEPT])
+            .allowed_header(http::header::CONTENT_TYPE)
+            .max_age(3600);
+
+
         App::new()
             .wrap(Logger::new("%a %{User-Agent}i"))
+            .wrap(cors)
             .app_data(web::Data::new(AppState {
                 app_name: String::from("Schili Sensor Server"),
             }))
