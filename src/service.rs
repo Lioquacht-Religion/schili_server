@@ -543,3 +543,34 @@ pub async fn insert_co2(
 
     Ok(())
 }
+
+// ++++++++++++++ BUNDLED MEASUREMENTS - SECTION +++++++++++++++++++++
+
+pub async fn insert_bundled_measurements(
+    pool: &Pool<Postgres>,
+    api_measurements: &api::SensorTypedSimpleMeasurements,
+) -> anyhow::Result<()> {
+    todo!()
+}
+
+// ++++++++++++++ ERROR - SECTION +++++++++++++++++++++
+
+pub async fn insert_sensor_error(
+    pool: &Pool<Postgres>,
+    api_sensor_error: &api::SensorError,
+) -> anyhow::Result<()> {
+    let (sensor_ref, mut db_sensor_error): (String, repository::SensorError) = (&*api_sensor_error).model_into();
+    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
+        .await
+        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
+    repository::insert_single_sensor_error(&pool, sensor.sensor_id, &mut db_sensor_error)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Could not add sensor error for sensor with reference='{}'.",
+                sensor_ref
+           )
+        })?;
+
+    Ok(())
+}

@@ -4,7 +4,6 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use chrono::{NaiveDateTime, TimeDelta, Utc};
-use schili_api::api;
 use sqlx::{PgPool, Pool, Postgres, Row, postgres::{PgRow, types::PgInterval}, prelude::FromRow, types::BigDecimal};
 
 pub async fn start_sql_query(
@@ -971,3 +970,39 @@ pub async fn insert_single_sensor_co2_measure(
 
     Ok(())
 }
+
+// ++++++++++++++ Error - SECTION +++++++++++++++++++++
+
+pub struct SensorError{
+    pub sensor_error_id: i64,
+    pub sensor_id: i32,
+    pub error_code: i32,
+    pub error_text: String,
+    pub error_time: NaiveDateTime,
+}
+
+pub async fn insert_single_sensor_error(
+    pool: &PgPool,
+    sensor_id: i32,
+    error: &mut SensorError,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let sensor_error_id = sqlx::query!(
+        r#"
+           INSERT INTO sensor_errors (sensor_id, error_code, error_text, error_time) 
+           VALUES ($1, $2, $3, $4)
+           RETURNING sensor_error_id
+        "#,
+        sensor_id,
+        &error.error_code,
+        &error.error_text,
+        &error.error_time
+    )
+    .fetch_one(pool)
+    .await?;
+
+    error.sensor_error_id = sensor_error_id.sensor_error_id;
+
+    Ok(())
+}
+
+

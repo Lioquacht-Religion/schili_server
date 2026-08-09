@@ -6,8 +6,7 @@ use chrono::Utc;
 use log::{error, info};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS};
 use schili_api::mq_topics::{
-    TOPICS, chip_temperature_topic, sensor_airpressure_topic, sensor_battery_voltage_topic,
-    sensor_co2_topic, sensor_humidity_topic, sensor_temperature_topic,
+    TOPICS, chip_temperature_topic, sensor_airpressure_topic, sensor_battery_voltage_topic, sensor_co2_topic, sensor_error_topic, sensor_humidity_topic, sensor_temperature_topic
 };
 use sqlx::{Pool, Postgres};
 
@@ -59,6 +58,10 @@ async fn subscribe_to_topics(client: &AsyncClient) {
         .subscribe(sensor_co2_topic(UUID), QoS::AtMostOnce)
         .await
         .unwrap();
+    client
+        .subscribe(sensor_error_topic(UUID), QoS::AtMostOnce)
+        .await
+        .unwrap();
 }
 
 async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
@@ -81,7 +84,6 @@ async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
                 };
             }
             Err(e) => {
-                println!("Received = {:?}", e);
                 error!("Error received = {:?}", e);
             }
         }
@@ -126,6 +128,11 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
             serde_json::to_string(&sens_co2).unwrap()
         );
     }
+    if publish.topic.contains(&TOPICS.error) {
+        let mut sensor_error= extract_sensor_error(&publish)?;
+        sensor_error.error.error_time = Utc::now();
+        service::insert_sensor_error(pool, &sensor_error).await?;
+    }
     Ok(())
 }
 
@@ -139,6 +146,13 @@ fn extract_sensor_simple_measurement(
 fn extract_sensor_co2(
     publish: &Publish,
 ) -> anyhow::Result<schili_api::api::SensorSingleCo2Measure> {
+    let json_str: String = String::from_utf8(publish.payload.to_vec())?;
+    Ok(serde_json::from_str(&json_str)?)
+}
+
+fn extract_sensor_error(
+    publish: &Publish,
+) -> anyhow::Result<schili_api::api::SensorError> {
     let json_str: String = String::from_utf8(publish.payload.to_vec())?;
     Ok(serde_json::from_str(&json_str)?)
 }

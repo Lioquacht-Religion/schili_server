@@ -151,3 +151,34 @@ impl ModelFrom<&api::Co2Measurement> for repository::Co2 {
         }
     }
 }
+
+impl ModelFrom<&api::SensorError> for (String, repository::SensorError) {
+    fn model_from(value: &api::SensorError) -> Self {
+        let sensor_error= (&value.error).model_into();
+        (value.sensor_reference.clone(), sensor_error)
+    }
+}
+
+impl ModelFrom<repository::SensorError> for api::Error{
+    fn model_from(value: repository::SensorError) -> Self {
+        api::Error{
+            error_code: value.error_code.into(),
+            error_text: value.error_text,
+            error_time: value.error_time.and_utc(),
+        }
+    }
+}
+
+impl ModelFrom<&api::Error> for repository::SensorError{
+    fn model_from(value: &api::Error) -> Self {
+        repository::SensorError{
+            sensor_id: -1,
+            sensor_error_id: -1,
+            error_code: value.error_code.get_code(),
+            error_text: value.error_text.clone(),
+            error_time: value.error_time.naive_utc(),
+        }
+    }
+}
+
+

@@ -76,3 +76,12 @@ CREATE TABLE co2 (
 	measure_time timestamp NOT NULL
 );
 
+CREATE TABLE sensor_errors(
+	sensor_error_id bigint PRIMARY KEY
+	GENERATED ALWAYS AS IDENTITY,
+	sensor_id integer 
+	REFERENCES sensors (sensor_id) NOT NULL,
+	error_code integer NOT NULL,
+	error_text text NOT NULL,
+	error_time timestamp NOT NULL
+);
