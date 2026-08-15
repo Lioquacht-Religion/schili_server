@@ -101,23 +101,53 @@ enum TempStatus {
 
 const TEMP_CHANGE_WARNING: i32 = 10;
 
-pub async fn insert_temperature<'a, 'b>(
+pub async fn insert_temperature_w_sensor<'a, 'b>(
     pool: &'a Pool<Postgres>,
     api_temp_measure: &api::SensorSingleSimpleMeasure,
 ) -> anyhow::Result<()> {
-    let (sensor_ref, mut db_temp): (String, Temperature) = (&*api_temp_measure).model_into();
+    let sensor_ref = &api_temp_measure.sensor_reference;
 
     // TODO: check if results of these two queries can be cached
     let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
         .await
         .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
+    insert_temperature(pool, sensor.sensor_id, &api_temp_measure.measure);
+    Ok(())
+}
+
+pub async fn insert_temperature<'a, 'b>(
+    pool: &'a Pool<Postgres>,
+    sensor_id: i32,
+    api_temp_measure: &api::SimpleMeasurement,
+) -> anyhow::Result<()> {
     let cur_datetime = &Utc::now();
 
     //TODO: make temp range checks be stored on the db and changeble by user through api
     //TODO: add check for rate of change, to send an email preemtivily
     // to warn of rapidly increasing temperatures
     // TODO: add variable min offset time to search for latest temperature
-    let cur_temp = &api_temp_measure.measure.measurement;
+    let cur_temp = &api_temp_measure.measurement;
+    handle_temp_warning_email(pool, sensor_id, cur_temp, cur_datetime);
+
+    let mut db_temp: Temperature = (&*api_temp_measure).model_into();
+    repository::insert_single_sensor_temperature(&pool, sensor_id, &mut db_temp)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "Could not add temperature measurement for sensor with id='{}'.",
+                sensor_id
+            )
+        })?;
+
+    info!("sensor temps: {}", serde_json::to_string(api_temp_measure)?);
+    Ok(())
+}
+
+async fn handle_temp_warning_email(
+    pool: &Pool<Postgres>,
+    sensor_id: i32,
+    cur_temp: &BigDecimal, cur_datetime: &chrono::DateTime<Utc>
+){
     let temp_status: TempStatus = if let Ok(Temperature {
         temp_celsius: prev_temp,
         measure_time: prev_time,
@@ -125,7 +155,7 @@ pub async fn insert_temperature<'a, 'b>(
     }) =
         repository::find_sensor_last_temperature_before_at_datetime(
             pool,
-            sensor.sensor_id,
+            sensor_id,
             cur_datetime,
         )
         .await
@@ -172,17 +202,17 @@ pub async fn insert_temperature<'a, 'b>(
     match temp_status {
         TempStatus::HighTemp => email::send_high_temp_warning_email(
             &email_config,
-            &api_temp_measure.measure.measurement,
+            &cur_temp
         ),
         TempStatus::LowTemp => {
-            email::send_low_temp_warning_email(&email_config, &api_temp_measure.measure.measurement)
+            email::send_low_temp_warning_email(&email_config, &cur_temp)
         }
         TempStatus::StrongTempIncrease {
             prev_temp,
             diff_temp,
         } => email::send_strong_temp_increase_email(
             &email_config,
-            &api_temp_measure.measure.measurement,
+            &cur_temp,
             &prev_temp,
             &diff_temp,
         ),
@@ -191,24 +221,12 @@ pub async fn insert_temperature<'a, 'b>(
             diff_temp,
         } => email::send_strong_temp_decrease_email(
             &email_config,
-            &api_temp_measure.measure.measurement,
+            &cur_temp,
             &prev_temp,
             &diff_temp,
         ),
         TempStatus::NormalTemp => {}
     }
-
-    repository::insert_single_sensor_temperature(&pool, sensor.sensor_id, &mut db_temp)
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "Could not add temperature measurement for sensor with reference='{}'.",
-                sensor_ref
-            )
-        })?;
-
-    info!("sensor temps: {}", serde_json::to_string(api_temp_measure)?);
-    Ok(())
 }
 
 pub async fn insert_simple_measurement<'a, 'b, 'c, T, Fut, F>(
@@ -550,6 +568,22 @@ pub async fn insert_bundled_measurements(
     pool: &Pool<Postgres>,
     api_measurements: &api::SensorTypedSimpleMeasurements,
 ) -> anyhow::Result<()> {
+    let sensor_ref = &api_measurements.sensor_reference;
+    // TODO: check if results of these two queries can be cached
+    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
+        .await
+        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
+
+    for m in api_measurements.measurements.iter(){
+        match m.sensor_type{
+            SensorType::Temperature => insert_temperature(pool, sensor.sensor_id, &m.measure),
+            SensorType::Humidity => todo!(),
+            SensorType::Airpressure => todo!(),
+            SensorType::BatteryVoltage => todo!(),
+            SensorType::ChipTemperature => todo!(),
+            SensorType::Co2 => todo!(),
+        };
+    }
     todo!()
 }
 

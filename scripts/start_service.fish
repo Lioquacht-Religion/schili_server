@@ -15,7 +15,7 @@ echo 'Enabling posgreql service.'
 sudo systemctl enable postgresql.service
 set -gx DATABASE_URL "postgres://user:password@localhost/schili_sensor_db" 
 
-kill -0 'mosquitto'
+pkill -f -u $USER 'mosquitto'
 if test $status -eq 0; then
 	echo 'Mosquitto mqtt broker already running.'
 else 

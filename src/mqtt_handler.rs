@@ -99,7 +99,7 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
     if publish.topic.contains(&TOPICS.temp) {
         let mut sens_temps = extract_sensor_simple_measurement(&publish)?;
         sens_temps.measure.measure_time = Utc::now();
-        service::insert_temperature(pool, &sens_temps).await?;
+        service::insert_temperature_w_sensor(pool, &sens_temps).await?;
     }
     if publish.topic.contains(&TOPICS.humidity) {
         let mut sens_hums = extract_sensor_simple_measurement(&publish)?;
@@ -128,6 +128,10 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
             serde_json::to_string(&sens_co2).unwrap()
         );
     }
+    if publish.topic.contains(&TOPICS.measurement_bundle) {
+        let sensor_error= extract_sensor_measurement_bundle(&publish)?;
+        service::insert_bundled_measurements(pool, &sensor_error).await?;
+    }
     if publish.topic.contains(&TOPICS.error) {
         let mut sensor_error= extract_sensor_error(&publish)?;
         sensor_error.error.error_time = Utc::now();
@@ -139,6 +143,13 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
 fn extract_sensor_simple_measurement(
     publish: &Publish,
 ) -> anyhow::Result<schili_api::api::SensorSingleSimpleMeasure> {
+    let json_str: String = String::from_utf8(publish.payload.to_vec())?;
+    Ok(serde_json::from_str(&json_str)?)
+}
+
+fn extract_sensor_measurement_bundle(
+    publish: &Publish,
+) -> anyhow::Result<schili_api::api::SensorTypedSimpleMeasurements> {
     let json_str: String = String::from_utf8(publish.payload.to_vec())?;
     Ok(serde_json::from_str(&json_str)?)
 }
