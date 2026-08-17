@@ -76,11 +76,13 @@ async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
                     continue;
                 };
 
-                if let Err(e) = handle_publish(db_pool, &publish).await {
-                    error!(
-                        "An error occured while trying to process published messages: error: {}",
-                        e
-                    );
+                if let Err(es) = handle_publish(db_pool, &publish).await {
+                    for e in es{
+                        error!(
+                            "An error occured while trying to process published messages: error: {}",
+                            e
+                        );
+                    }
                 };
             }
             Err(e) => {
@@ -90,34 +92,46 @@ async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
     }
 }
 
-async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Result<()> {
+async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Result<(), Vec<anyhow::Error>> {
+    let mut errors: Vec<anyhow::Error> = Vec::new();
     if publish.topic.contains(&TOPICS.chip_temp) {
-        let mut chip_temp = extract_sensor_simple_measurement(publish)?;
+        let mut chip_temp = extract_sensor_simple_measurement(publish)
+            .map_err(|e| vec![e])?;
         chip_temp.measure.measure_time = Utc::now();
-        service::insert_chip_temperature(pool, &chip_temp).await?;
+        let _ = service::insert_chip_temperature(pool, &chip_temp).await
+            .map_err(|e| errors.push(e));
     }
     if publish.topic.contains(&TOPICS.temp) {
-        let mut sens_temps = extract_sensor_simple_measurement(&publish)?;
+        let mut sens_temps = extract_sensor_simple_measurement(&publish)
+            .map_err(|e| vec![e])?;
         sens_temps.measure.measure_time = Utc::now();
-        service::insert_temperature_w_sensor(pool, &sens_temps).await?;
+        let _ = service::insert_temperature_w_sensor(pool, &sens_temps).await
+            .map_err(|e| errors.push(e));
     }
     if publish.topic.contains(&TOPICS.humidity) {
-        let mut sens_hums = extract_sensor_simple_measurement(&publish)?;
+        let mut sens_hums = extract_sensor_simple_measurement(&publish)
+            .map_err(|e| vec![e])?;
         sens_hums.measure.measure_time = Utc::now();
-        service::insert_humidity(pool, &sens_hums).await?;
+        let _ = service::insert_humidity(pool, &sens_hums).await
+            .map_err(|e| errors.push(e));
     }
     if publish.topic.contains(&TOPICS.air_pressure) {
-        let mut sens_hums = extract_sensor_simple_measurement(&publish)?;
+        let mut sens_hums = extract_sensor_simple_measurement(&publish)
+            .map_err(|e| vec![e])?;
         sens_hums.measure.measure_time = Utc::now();
-        service::insert_airpressure(pool, &sens_hums).await?;
+        let _ = service::insert_airpressure(pool, &sens_hums).await
+            .map_err(|e| errors.push(e));
     }
     if publish.topic.contains(&TOPICS.battery_voltage) {
-        let mut sens_battv = extract_sensor_simple_measurement(&publish)?;
+        let mut sens_battv = extract_sensor_simple_measurement(&publish)
+            .map_err(|e| vec![e])?;
         sens_battv.measure.measure_time = Utc::now();
-        service::insert_battery_voltage(pool, &sens_battv).await?;
+        let _ = service::insert_battery_voltage(pool, &sens_battv).await
+            .map_err(|e| errors.push(e));
     }
     if publish.topic.contains(&TOPICS.co2) {
-        let mut sens_co2 = extract_sensor_co2(&publish)?;
+        let mut sens_co2 = extract_sensor_co2(&publish)
+            .map_err(|e| vec![e])?;
         sens_co2.co2_measure.measure_time = Utc::now();
         if let Err(e) = service::insert_co2(pool, &sens_co2).await {
             error!("Could not insert co2 from mq publish. error: {}", e);
@@ -129,15 +143,23 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
         );
     }
     if publish.topic.contains(&TOPICS.measurement_bundle) {
-        let sensor_error= extract_sensor_measurement_bundle(&publish)?;
+        let sensor_error= extract_sensor_measurement_bundle(&publish)
+            .map_err(|e| vec![e])?;
         service::insert_bundled_measurements(pool, &sensor_error).await?;
     }
     if publish.topic.contains(&TOPICS.error) {
-        let mut sensor_error= extract_sensor_error(&publish)?;
+        let mut sensor_error= extract_sensor_error(&publish)
+            .map_err(|e| vec![e])?;
         sensor_error.error.error_time = Utc::now();
-        service::insert_sensor_error(pool, &sensor_error).await?;
+        let _ = service::insert_sensor_error(pool, &sensor_error).await
+            .map_err(|e| errors.push(e));
     }
-    Ok(())
+    if errors.is_empty(){
+        Ok(())
+    }
+    else{
+        Err(errors)
+    }
 }
 
 fn extract_sensor_simple_measurement(

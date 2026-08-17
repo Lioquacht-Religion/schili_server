@@ -111,35 +111,43 @@ pub async fn insert_temperature_w_sensor<'a, 'b>(
     let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
         .await
         .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
-    insert_temperature(pool, sensor.sensor_id, &api_temp_measure.measure);
+    insert_measurement(pool, sensor.sensor_id, SensorType::Temperature, &api_temp_measure.measure).await?;
     Ok(())
 }
 
-pub async fn insert_temperature<'a, 'b>(
+pub async fn insert_measurement<'a, 'b>(
     pool: &'a Pool<Postgres>,
     sensor_id: i32,
-    api_temp_measure: &api::SimpleMeasurement,
+    sensor_type: SensorType,
+    api_measure: &api::SimpleMeasurement,
 ) -> anyhow::Result<()> {
     let cur_datetime = &Utc::now();
 
-    //TODO: make temp range checks be stored on the db and changeble by user through api
-    //TODO: add check for rate of change, to send an email preemtivily
-    // to warn of rapidly increasing temperatures
-    // TODO: add variable min offset time to search for latest temperature
-    let cur_temp = &api_temp_measure.measurement;
-    handle_temp_warning_email(pool, sensor_id, cur_temp, cur_datetime);
+    let cur_temp = &api_measure.measurement;
+    handle_temp_warning_email(pool, sensor_id, cur_temp, cur_datetime).await;
 
-    let mut db_temp: Temperature = (&*api_temp_measure).model_into();
-    repository::insert_single_sensor_temperature(&pool, sensor_id, &mut db_temp)
-        .await
-        .map_err(|_| {
+    match sensor_type{
+            SensorType::Temperature => repository::insert_single_sensor_temperature(
+                pool, sensor_id, &mut api_measure.model_into()).await,
+            SensorType::Humidity => repository::insert_single_sensor_humidity(
+                pool, sensor_id, &mut api_measure.model_into()).await,
+            SensorType::Airpressure => repository::insert_single_sensor_airpressure(
+                pool, sensor_id, &mut api_measure.model_into()).await,
+            SensorType::BatteryVoltage => repository::insert_single_sensor_battery_voltage(
+                pool, sensor_id, &mut api_measure.model_into()).await,
+            SensorType::ChipTemperature => repository::insert_single_sensor_chip_temperature(
+                pool, sensor_id, &mut api_measure.model_into()).await,
+            SensorType::Co2 => Err(anyhow!("Measurement type CO2 is not supported.")),
+    }
+    .map_err(|_| {
             anyhow!(
-                "Could not add temperature measurement for sensor with id='{}'.",
+                "Could not add {} measurement for sensor with id='{}'.",
+                sensor_type.to_str(),
                 sensor_id
             )
         })?;
 
-    info!("sensor temps: {}", serde_json::to_string(api_temp_measure)?);
+    info!("sensor temps: {}", serde_json::to_string(api_measure)?);
     Ok(())
 }
 
@@ -238,7 +246,7 @@ pub async fn insert_simple_measurement<'a, 'b, 'c, T, Fut, F>(
 ) -> anyhow::Result<()>
 where
     T: DBSimpleMeasurement + 'static,
-    Fut: Future<Output = std::result::Result<(), Box<dyn std::error::Error>>> + Send + 'c,
+    Fut: Future<Output = anyhow::Result<()>> + Send + 'c,
     F: FnOnce(&'a Pool<Postgres>, i32, &'b mut T) -> Fut + 'static,
 {
     let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
@@ -532,7 +540,6 @@ pub async fn insert_battery_voltage<'a>(
             e
         );
     }
-
     info!(
         "sensor battery voltage: {}",
         serde_json::to_string(api_battvolt_measure).unwrap()
@@ -567,24 +574,25 @@ pub async fn insert_co2(
 pub async fn insert_bundled_measurements(
     pool: &Pool<Postgres>,
     api_measurements: &api::SensorTypedSimpleMeasurements,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<(), Vec<anyhow::Error>> {
     let sensor_ref = &api_measurements.sensor_reference;
     // TODO: check if results of these two queries can be cached
     let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
         .await
-        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
+        .map_err(|_| vec![anyhow!("Could not find sensor by reference='{}'.", sensor_ref)])?;
 
+    let mut errors: Vec<anyhow::Error> = Vec::new();
     for m in api_measurements.measurements.iter(){
-        match m.sensor_type{
-            SensorType::Temperature => insert_temperature(pool, sensor.sensor_id, &m.measure),
-            SensorType::Humidity => todo!(),
-            SensorType::Airpressure => todo!(),
-            SensorType::BatteryVoltage => todo!(),
-            SensorType::ChipTemperature => todo!(),
-            SensorType::Co2 => todo!(),
-        };
+        if let Err(e) = insert_measurement(pool, sensor.sensor_id, m.sensor_type, &m.measure).await {
+            errors.push(e);
+        }
     }
-    todo!()
+    if errors.is_empty(){
+        Ok(())
+    }
+    else{
+        Err(errors)
+    }
 }
 
 // ++++++++++++++ ERROR - SECTION +++++++++++++++++++++

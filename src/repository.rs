@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-use anyhow::anyhow;
+use anyhow::{Result, anyhow};
 use chrono::{NaiveDateTime, TimeDelta, Utc};
 use sqlx::{PgPool, Pool, Postgres, Row, postgres::{PgRow, types::PgInterval}, prelude::FromRow, types::BigDecimal};
 
@@ -470,7 +470,7 @@ pub async fn insert_single_sensor_temperature(
     pool: &PgPool,
     sensor_id: i32,
     temperature: &mut Temperature,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let temperature_id = sqlx::query!(
         r#"
            INSERT INTO temperatures (sensor_id, temp_celsius, measure_time) 
@@ -796,7 +796,7 @@ pub async fn insert_sensor_humidity_measures(
     pool: &PgPool,
     sensor_id: i32,
     humidities: &mut Vec<Humidity>,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let mut temps: Vec<BigDecimal> = Vec::with_capacity(humidities.len());
     let mut times: Vec<chrono::NaiveDateTime> = Vec::with_capacity(humidities.len());
     for t in humidities.iter() {
@@ -823,7 +823,7 @@ pub async fn insert_single_sensor_humidity(
     pool: &PgPool,
     sensor_id: i32,
     humidity: &mut Humidity,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let rec = sqlx::query!(
         r#"
            INSERT INTO humidities (sensor_id, humidity_percent, measure_time) 
@@ -848,7 +848,7 @@ pub async fn insert_sensor_airpressure_measures(
     pool: &PgPool,
     sensor_id: i32,
     airpressures: &mut Vec<AirPressure>,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let mut temps: Vec<BigDecimal> = Vec::with_capacity(airpressures.len());
     let mut times: Vec<chrono::NaiveDateTime> = Vec::with_capacity(airpressures.len());
     for t in airpressures.iter() {
@@ -875,7 +875,7 @@ pub async fn insert_single_sensor_airpressure(
     pool: &PgPool,
     sensor_id: i32,
     air_pressure: &mut AirPressure,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let rec = sqlx::query!(
         r#"
            INSERT INTO air_pressures (sensor_id, air_pressure_pa, measure_time) 
@@ -900,7 +900,7 @@ pub async fn insert_single_sensor_chip_temperature(
     pool: &PgPool,
     sensor_id: i32,
     chip_temp: &mut ChipTemperature,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let rec = sqlx::query!(
         r#"
            INSERT INTO chip_temperatures (sensor_id, temp_celsius, measure_time) 
@@ -925,7 +925,7 @@ pub async fn insert_single_sensor_battery_voltage(
     pool: &PgPool,
     sensor_id: i32,
     batt_volt: &mut BatteryVoltage,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let rec = sqlx::query!(
         r#"
            INSERT INTO battery_voltages (sensor_id, battery_volt, measure_time) 
