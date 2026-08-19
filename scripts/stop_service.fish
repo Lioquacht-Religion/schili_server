@@ -10,12 +10,4 @@ function kill_process
 end
 
 kill_process 'sensor_data_server'
-
-echo 'Enabling posgreql service.'
-sudo systemctl enable postgresql.service
-#set -gx DATABASE_URL "postgres://user:password@localhost/schili_sensor_db" 
-
 kill_process 'mosquitto'
-mosquitto -c mosquitto.conf &
-
-./dist/sensor_data_server &

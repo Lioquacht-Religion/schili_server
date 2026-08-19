@@ -21,14 +21,11 @@ pub async fn start_http_server() -> std::io::Result<()> {
     let config = config::get_config().await;
 
     HttpServer::new(move || {
-        let cors = Cors::default()
-            //.allowed_origin("https://www.rust-lang.org")
-            .allowed_origin("http://localhost:8090")
-            .allowed_origin("http://192.168.2.226:8090")
-            .allowed_origin("http://192.168.2.211:8090")
-            //.allowed_origin("http://192.168.2.226:8090/sensor/all")
-            //.allowed_origin("http://192.168.2.211:8090/sensor/all")
-            .allowed_methods(vec!["GET", "POST", "UPDATE"])
+        let mut cors = Cors::default();
+        for cors_host in config.http_service.cors_hosts.iter(){
+            cors = cors.allowed_origin(cors_host);
+        }
+        let cors = cors.allowed_methods(vec!["GET", "POST", "UPDATE"])
             .allowed_headers(vec![http::header::AUTHORIZATION, http::header::ACCEPT])
             .allowed_header(http::header::CONTENT_TYPE)
             .max_age(3600);

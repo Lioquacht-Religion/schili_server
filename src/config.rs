@@ -28,6 +28,7 @@ pub struct Config {
 pub struct HttpServiceConfig {
     pub(crate) host: String,
     pub(crate) port: u16,
+    pub(crate) cors_hosts: Vec<String>,
 }
 
 #[derive(Deserialize)]

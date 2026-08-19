@@ -147,7 +147,10 @@ pub async fn insert_measurement<'a, 'b>(
             )
         })?;
 
-    info!("sensor temps: {}", serde_json::to_string(api_measure)?);
+    info!("sensor {} measurement: {}",
+        sensor_type.to_str(),
+        serde_json::to_string(api_measure)?
+    );
     Ok(())
 }
 
@@ -573,7 +576,7 @@ pub async fn insert_co2(
 
 pub async fn insert_bundled_measurements(
     pool: &Pool<Postgres>,
-    api_measurements: &api::SensorTypedSimpleMeasurements,
+    api_measurements: &mut api::SensorTypedSimpleMeasurements,
 ) -> anyhow::Result<(), Vec<anyhow::Error>> {
     let sensor_ref = &api_measurements.sensor_reference;
     // TODO: check if results of these two queries can be cached
@@ -582,7 +585,8 @@ pub async fn insert_bundled_measurements(
         .map_err(|_| vec![anyhow!("Could not find sensor by reference='{}'.", sensor_ref)])?;
 
     let mut errors: Vec<anyhow::Error> = Vec::new();
-    for m in api_measurements.measurements.iter(){
+    for m in api_measurements.measurements.iter_mut(){
+        m.measure.measure_time = Utc::now();
         if let Err(e) = insert_measurement(pool, sensor.sensor_id, m.sensor_type, &m.measure).await {
             errors.push(e);
         }

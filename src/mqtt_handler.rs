@@ -4,11 +4,12 @@ use std::time::Duration;
 
 use chrono::Utc;
 use log::{error, info};
-use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS};
+use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS, StateError};
 use schili_api::mq_topics::{
-    TOPICS, chip_temperature_topic, sensor_airpressure_topic, sensor_battery_voltage_topic, sensor_co2_topic, sensor_error_topic, sensor_humidity_topic, sensor_temperature_topic
+    chip_temperature_topic, sensor_airpressure_topic, sensor_battery_voltage_topic, sensor_co2_topic, sensor_error_topic, sensor_humidity_topic, sensor_measurements_bundle_topic, sensor_temperature_topic, TOPICS
 };
 use sqlx::{Pool, Postgres};
+use tokio::io;
 
 use crate::{config::Config, database, service};
 
@@ -28,71 +29,80 @@ pub async fn start_mq_client(app_config: &Config) {
     let pool = database::create_db_pool().await;
 
     let _handle = actix_rt::spawn(async move {
-        subscribe_to_topics(&client).await;
-        handle_mq_events(&mut eventloop, &pool).await;
+        loop{
+            subscribe_to_topics(&client).await;
+            handle_mq_events(&mut eventloop, &pool).await;
+        }
     });
 }
 
 async fn subscribe_to_topics(client: &AsyncClient) {
     client
-        .subscribe(chip_temperature_topic(UUID), QoS::AtMostOnce)
+        .subscribe(chip_temperature_topic(UUID), QoS::AtLeastOnce)
         .await
         .unwrap();
     client
-        .subscribe(sensor_temperature_topic(UUID), QoS::AtMostOnce)
+        .subscribe(sensor_temperature_topic(UUID), QoS::AtLeastOnce)
         .await
         .unwrap();
     client
-        .subscribe(sensor_humidity_topic(UUID), QoS::AtMostOnce)
+        .subscribe(sensor_humidity_topic(UUID), QoS::AtLeastOnce)
         .await
         .unwrap();
     client
-        .subscribe(sensor_airpressure_topic(UUID), QoS::AtMostOnce)
+        .subscribe(sensor_airpressure_topic(UUID), QoS::AtLeastOnce)
         .await
         .unwrap();
     client
-        .subscribe(sensor_battery_voltage_topic(UUID), QoS::AtMostOnce)
+        .subscribe(sensor_battery_voltage_topic(UUID), QoS::AtLeastOnce)
         .await
         .unwrap();
     client
-        .subscribe(sensor_co2_topic(UUID), QoS::AtMostOnce)
+        .subscribe(sensor_co2_topic(UUID), QoS::AtLeastOnce)
         .await
         .unwrap();
     client
-        .subscribe(sensor_error_topic(UUID), QoS::AtMostOnce)
+        .subscribe(sensor_measurements_bundle_topic(UUID), QoS::AtLeastOnce)
+        .await
+        .unwrap();
+    client
+        .subscribe(sensor_error_topic(UUID), QoS::AtLeastOnce)
         .await
         .unwrap();
 }
 
-async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) {
+struct DisconnectOccured;
+
+async fn handle_mq_events(eventloop: &mut EventLoop, db_pool: &Pool<Postgres>) -> DisconnectOccured{
     loop {
         let event = eventloop.poll().await;
         match event {
-            Ok(notification) => {
-                info!("Received = {:?}", notification);
-                let publish = if let Event::Incoming(Packet::Publish(publish)) = notification {
-                    publish
-                } else {
-                    continue;
-                };
-
+            Ok(Event::Incoming(Packet::Publish(publish))) => {
                 if let Err(es) = handle_publish(db_pool, &publish).await {
                     for e in es{
                         error!(
-                            "An error occured while trying to process published messages: error: {}",
-                            e
+                            "An error occured while trying to process published messages: error: {e}"
                         );
                     }
                 };
             }
+            Ok(_event) => {
+                continue;
+            }
             Err(e) => {
                 error!("Error received = {:?}", e);
+                if let rumqttc::ConnectionError::MqttState(StateError::Io(e)) = e {
+                    if let io::ErrorKind::ConnectionAborted = e.kind(){
+                        return DisconnectOccured;
+                    }
+                }
             }
         }
     }
 }
 
 async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Result<(), Vec<anyhow::Error>> {
+    info!("Publish received for topic: {}", &publish.topic);
     let mut errors: Vec<anyhow::Error> = Vec::new();
     if publish.topic.contains(&TOPICS.chip_temp) {
         let mut chip_temp = extract_sensor_simple_measurement(publish)
@@ -143,9 +153,9 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
         );
     }
     if publish.topic.contains(&TOPICS.measurement_bundle) {
-        let sensor_error= extract_sensor_measurement_bundle(&publish)
+        let mut sensor = extract_sensor_measurement_bundle(&publish)
             .map_err(|e| vec![e])?;
-        service::insert_bundled_measurements(pool, &sensor_error).await?;
+        service::insert_bundled_measurements(pool, &mut sensor).await?;
     }
     if publish.topic.contains(&TOPICS.error) {
         let mut sensor_error= extract_sensor_error(&publish)
@@ -173,6 +183,7 @@ fn extract_sensor_measurement_bundle(
     publish: &Publish,
 ) -> anyhow::Result<schili_api::api::SensorTypedSimpleMeasurements> {
     let json_str: String = String::from_utf8(publish.payload.to_vec())?;
+    info!("measure bundle: {}", &json_str);
     Ok(serde_json::from_str(&json_str)?)
 }
 
