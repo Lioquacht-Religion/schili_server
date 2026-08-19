@@ -127,8 +127,7 @@ pub async fn insert_measurement<'a, 'b>(
     handle_temp_warning_email(pool, sensor_id, cur_temp, cur_datetime).await;
 
     match sensor_type{
-            SensorType::Temperature => repository::insert_single_sensor_temperature(
-                pool, sensor_id, &mut api_measure.model_into()).await,
+            SensorType::Temperature => add_temperature_measurement(pool, sensor_id, api_measure).await,
             SensorType::Humidity => repository::insert_single_sensor_humidity(
                 pool, sensor_id, &mut api_measure.model_into()).await,
             SensorType::Airpressure => repository::insert_single_sensor_airpressure(
@@ -141,9 +140,9 @@ pub async fn insert_measurement<'a, 'b>(
                 pool, sensor_id, &mut api_measure.model_into()).await,
             SensorType::Co2 => Err(anyhow!("Measurement type CO2 is not supported.")),
     }
-    .map_err(|_| {
+    .map_err(|e| {
             anyhow!(
-                "Could not add {} measurement for sensor with id='{}'.",
+                "Could not add {} measurement for sensor with id='{}'. Error: {e}",
                 sensor_type.to_str(),
                 sensor_id
             )
@@ -154,6 +153,19 @@ pub async fn insert_measurement<'a, 'b>(
         serde_json::to_string(api_measure)?
     );
     Ok(())
+}
+
+async fn add_temperature_measurement(
+    pool: &Pool<Postgres>,
+    sensor_id: i32,
+    api_measure: &api::SimpleMeasurement,
+) -> anyhow::Result<()>{
+    let cur_datetime = &Utc::now();
+
+    let cur_temp = &api_measure.measurement;
+    handle_temp_warning_email(pool, sensor_id, cur_temp, cur_datetime).await;
+    repository::insert_single_sensor_temperature(
+                pool, sensor_id, &mut api_measure.model_into()).await
 }
 
 async fn handle_temp_warning_email(
