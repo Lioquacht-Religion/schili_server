@@ -121,11 +121,6 @@ pub async fn insert_measurement<'a, 'b>(
     sensor_type: SensorType,
     api_measure: &api::SimpleMeasurement,
 ) -> anyhow::Result<()> {
-    let cur_datetime = &Utc::now();
-
-    let cur_temp = &api_measure.measurement;
-    handle_temp_warning_email(pool, sensor_id, cur_temp, cur_datetime).await;
-
     match sensor_type{
             SensorType::Temperature => add_temperature_measurement(pool, sensor_id, api_measure).await,
             SensorType::Humidity => repository::insert_single_sensor_humidity(
