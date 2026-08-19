@@ -6,7 +6,7 @@ use chrono::Utc;
 use log::{error, info};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS, StateError};
 use schili_api::mq_topics::{
-    chip_temperature_topic, sensor_airpressure_topic, sensor_battery_voltage_topic, sensor_co2_topic, sensor_error_topic, sensor_humidity_topic, sensor_measurements_bundle_topic, sensor_temperature_topic, TOPICS
+    TOPICS, chip_temperature_topic, sensor_airpressure_topic, sensor_battery_voltage_topic, sensor_co2_topic, sensor_error_topic, sensor_humidity_topic, sensor_lightintensity_topic, sensor_measurements_bundle_topic, sensor_temperature_topic
 };
 use sqlx::{Pool, Postgres};
 use tokio::io;
@@ -51,6 +51,10 @@ async fn subscribe_to_topics(client: &AsyncClient) {
         .unwrap();
     client
         .subscribe(sensor_airpressure_topic(UUID), QoS::AtLeastOnce)
+        .await
+        .unwrap();
+    client
+        .subscribe(sensor_lightintensity_topic(UUID), QoS::AtLeastOnce)
         .await
         .unwrap();
     client
@@ -132,6 +136,14 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
         let _ = service::insert_airpressure(pool, &sens_hums).await
             .map_err(|e| errors.push(e));
     }
+    if publish.topic.contains(&TOPICS.light_intensity) {
+        let mut sens_hums = extract_sensor_simple_measurement(&publish)
+            .map_err(|e| vec![e])?;
+        sens_hums.measure.measure_time = Utc::now();
+        let _ = service::insert_airpressure(pool, &sens_hums).await
+            .map_err(|e| errors.push(e));
+    }
+
     if publish.topic.contains(&TOPICS.battery_voltage) {
         let mut sens_battv = extract_sensor_simple_measurement(&publish)
             .map_err(|e| vec![e])?;

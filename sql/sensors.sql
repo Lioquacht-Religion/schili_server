@@ -5,6 +5,8 @@ ALTER TYPE sensor_type ADD VALUE 'chiptemperature' AFTER 'co2';
 
 ALTER TYPE sensor_type ADD VALUE 'batteryvoltage' AFTER 'chiptemperature';
 
+ALTER TYPE sensor_type ADD VALUE 'lightintensity' AFTER 'airpressure';
+
 CREATE TABLE sensors(
 	sensor_id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
 	sensor_reference text UNIQUE NOT NULL,
@@ -55,6 +57,17 @@ CREATE TABLE air_pressures (
 );
 
 ALTER TABLE air_pressures ALTER COLUMN air_pressure_pa TYPE numeric(32,9);
+
+DROP TABLE light_intesities;
+
+CREATE TABLE light_intensities(
+	light_intensity_id bigint PRIMARY KEY
+	GENERATED ALWAYS AS IDENTITY,
+	sensor_id integer 
+	REFERENCES sensors (sensor_id) NOT NULL,
+	light_intensity numeric(6, 9) NOT NULL,
+	measure_time timestamp NOT NULL
+);
 
 CREATE TABLE battery_voltages(
 	battery_voltage_id bigint PRIMARY KEY

@@ -34,6 +34,7 @@ pub enum SensorType {
     Temperature,
     Humidity,
     Airpressure,
+    LightIntensity,
     Co2,
     BatteryVoltage,
     ChipTemperature,
@@ -51,6 +52,7 @@ impl From<&SensorType> for &str {
             SensorType::Temperature => "temperature",
             SensorType::Humidity => "humidity",
             SensorType::Airpressure => "airpressure",
+            SensorType::LightIntensity => "lightintensity",
             SensorType::ChipTemperature => "chiptemperature",
             SensorType::BatteryVoltage => "BatteryVoltage",
             SensorType::Co2 => "co2",
@@ -160,6 +162,25 @@ impl DBSimpleMeasurement for AirPressure {
     }
 }
 
+pub struct LightIntensity{
+    pub light_intensity_id: i64,
+    pub sensor_id: i32,
+    pub light_intensity: BigDecimal,
+    pub measure_time: NaiveDateTime,
+}
+
+impl DBSimpleMeasurement for LightIntensity{
+    fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self::new(measurement, measure_time)
+    }
+    fn measurement(&self) -> &BigDecimal {
+        &self.light_intensity
+    }
+    fn measure_time(&self) -> NaiveDateTime {
+        self.measure_time
+    }
+}
+
 pub struct ChipTemperature {
     pub chip_temperature_id: i64,
     pub sensor_id: i32,
@@ -259,6 +280,19 @@ impl AirPressure {
         }
     }
 }
+
+impl LightIntensity {
+    pub fn new(light_intensity: BigDecimal, measure_time: NaiveDateTime) -> Self {
+        Self {
+            light_intensity_id: -1,
+            sensor_id: -1,
+            light_intensity,
+            measure_time,
+        }
+    }
+}
+
+
 
 impl ChipTemperature {
     pub fn new(temp_celsius: BigDecimal, measure_time: NaiveDateTime) -> Self {
@@ -505,6 +539,7 @@ pub async fn insert_single_sensor_temperature(
         SELECT_IN_TS_RANGE_SQL_1, "temp_celsius", SELECT_IN_TS_RANGE_SQL_2, "temperatures", SELECT_IN_TS_RANGE_SQL_3);
     const SELECT_HUM_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_IN_TS_RANGE_SQL_1, "humidity_percent", SELECT_IN_TS_RANGE_SQL_2, "humidities", SELECT_IN_TS_RANGE_SQL_3);
     const SELECT_AIRP_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_IN_TS_RANGE_SQL_1, "air_pressure_pa", SELECT_IN_TS_RANGE_SQL_2, "air_pressures", SELECT_IN_TS_RANGE_SQL_3);
+    const SELECT_LIGHTINT_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_IN_TS_RANGE_SQL_1, "light_intensity", SELECT_IN_TS_RANGE_SQL_2, "light_intensities", SELECT_IN_TS_RANGE_SQL_3);
     const SELECT_BATVOLT_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_IN_TS_RANGE_SQL_1, "battery_volt",SELECT_IN_TS_RANGE_SQL_2, "battery_voltages", SELECT_IN_TS_RANGE_SQL_3);
     const SELECT_CHIPTEMP_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_IN_TS_RANGE_SQL_1, "temp_celsius",SELECT_IN_TS_RANGE_SQL_2, "chip_temperatures", SELECT_IN_TS_RANGE_SQL_3);
 
@@ -541,6 +576,18 @@ pub async fn find_sensor_airpressures_in_timerange(
     find_sensor_simple_measures_in_timerange(
         pool, sensor_id, start_datetime, end_datetime,
         SELECT_AIRP_IN_TS_RANGE_SQL
+    ).await
+}
+
+pub async fn find_sensor_lightintensities_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+) -> anyhow::Result<Vec<SimpleMeasurement>> {
+    find_sensor_simple_measures_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime,
+        SELECT_LIGHTINT_IN_TS_RANGE_SQL
     ).await
 }
 
@@ -600,6 +647,7 @@ pub async fn find_sensor_simple_measures_in_timerange(
     const SELECT_MIN_MAX_TEMP_SQL : &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "temperatures", MIN_MAX_SQL_2);
     const SELECT_MIN_MAX_HUM_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "humidities", MIN_MAX_SQL_2);
     const SELECT_MIN_MAX_AIRP_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "air_pressures", MIN_MAX_SQL_2);
+    const SELECT_MIN_MAX_LIGHTINT_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "light_intensities", MIN_MAX_SQL_2);
     const SELECT_MIN_MAX_BATVOLT_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "battery_voltages", MIN_MAX_SQL_2);
     const SELECT_MIN_MAX_CHIPTEMP_SQL: &'static str = const_format::concatcp!(MIN_MAX_SQL_1, "chip_temperatures", MIN_MAX_SQL_2);
 
@@ -626,6 +674,7 @@ pub async fn find_sensor_simple_measures_in_timerange(
         SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "temp_celsius", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "temperatures", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3);
     const SELECT_AVG_HUM_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "humidity_percent", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "humidities", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3);
     const SELECT_AVG_AIRP_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "air_pressure_pa", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "air_pressures", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3, );
+    const SELECT_AVG_LIGHTINT_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "light_intensity", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "light_intensities", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3, );
     const SELECT_AVG_BATVOLT_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "battery_volt",SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "battery_voltages", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3);
     const SELECT_AVG_CHIPTEMP_INTERVALS_IN_TS_RANGE_SQL : &'static str = const_format::concatcp!(SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_1, "temp_celsius",SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_2, "chip_temperatures", SELECT_AVG_INTERVALS_IN_TS_RANGE_SQL_3);
 
@@ -682,6 +731,20 @@ pub async fn find_sensor_avg_airpressures_by_intervals_in_timerange(
         pool, sensor_id, start_datetime, end_datetime, interval, 
         SELECT_MIN_MAX_AIRP_SQL, 
         SELECT_AVG_AIRP_INTERVALS_IN_TS_RANGE_SQL
+    ).await
+}
+
+pub async fn find_sensor_avg_lightintensities_by_intervals_in_timerange(
+    pool: &PgPool,
+    sensor_id: i32,
+    start_datetime: &chrono::DateTime<Utc>,
+    end_datetime: &chrono::DateTime<Utc>,
+    interval: TimeDelta
+) -> anyhow::Result<Vec<AvgMeasureTimeInterval>> {
+    find_sensor_avg_simple_measures_by_intervals_in_timerange(
+        pool, sensor_id, start_datetime, end_datetime, interval, 
+        SELECT_MIN_MAX_LIGHTINT_SQL, 
+        SELECT_AVG_LIGHTINT_INTERVALS_IN_TS_RANGE_SQL
     ).await
 }
 
@@ -890,6 +953,31 @@ pub async fn insert_single_sensor_airpressure(
     .await?;
 
     air_pressure.air_pressure_id = rec.air_pressure_id;
+
+    Ok(())
+}
+
+// ++++++++++++++ Lightintesity - SECTION +++++++++++++++++++++
+
+pub async fn insert_single_sensor_lightintensity(
+    pool: &PgPool,
+    sensor_id: i32,
+    light_intensity: &mut LightIntensity,
+) -> Result<()> {
+    let rec = sqlx::query!(
+        r#"
+           INSERT INTO light_intensities (sensor_id, light_intensity, measure_time) 
+           VALUES ($1, $2, $3)
+           RETURNING light_intensity_id
+        "#,
+        sensor_id,
+        &light_intensity.light_intensity,
+        &light_intensity.measure_time
+    )
+    .fetch_one(pool)
+    .await?;
+
+    light_intensity.light_intensity_id = rec.light_intensity_id;
 
     Ok(())
 }

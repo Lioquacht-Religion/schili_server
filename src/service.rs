@@ -9,7 +9,7 @@ use sqlx::{Pool, Postgres};
 
 use crate::{
     api_db_conv::ModelInto, config, email, repository::{
-        self, AirPressure, AvgMeasureTimeInterval, BatteryVoltage, ChipTemperature, DBSimpleMeasurement, Humidity, Temperature
+        self, AirPressure, AvgMeasureTimeInterval, BatteryVoltage, ChipTemperature, DBSimpleMeasurement, Humidity, LightIntensity, Temperature
     }
 };
 
@@ -132,6 +132,8 @@ pub async fn insert_measurement<'a, 'b>(
             SensorType::Humidity => repository::insert_single_sensor_humidity(
                 pool, sensor_id, &mut api_measure.model_into()).await,
             SensorType::Airpressure => repository::insert_single_sensor_airpressure(
+                pool, sensor_id, &mut api_measure.model_into()).await,
+            SensorType::LightIntensity => repository::insert_single_sensor_lightintensity(
                 pool, sensor_id, &mut api_measure.model_into()).await,
             SensorType::BatteryVoltage => repository::insert_single_sensor_battery_voltage(
                 pool, sensor_id, &mut api_measure.model_into()).await,
@@ -308,6 +310,8 @@ pub async fn get_sensor_measurements_in_range(
         &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime).await,
         SensorType::Airpressure => repository::find_sensor_airpressures_in_timerange(
         &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime).await,
+        SensorType::LightIntensity => repository::find_sensor_lightintensities_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime).await,
         SensorType::Co2 => todo!(),
         SensorType::BatteryVoltage => repository::find_sensor_batteryvolt_in_timerange(
         &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime).await,
@@ -352,6 +356,8 @@ pub async fn get_sensor_avg_measurements_by_intervals_in_range(
         SensorType::Humidity => repository::find_sensor_avg_humidities_by_intervals_in_timerange(
         &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime,sensor_temp_range.interval).await,
         SensorType::Airpressure => repository::find_sensor_avg_airpressures_by_intervals_in_timerange(
+        &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime,sensor_temp_range.interval).await,
+        SensorType::LightIntensity => repository::find_sensor_avg_airpressures_by_intervals_in_timerange(
         &pool, sensor.sensor_id, &sensor_temp_range.start_datetime, &sensor_temp_range.end_datetime,sensor_temp_range.interval).await,
         SensorType::Co2 => todo!(),
         SensorType::BatteryVoltage => repository::find_sensor_avg_battvolt_by_intervals_in_timerange(
@@ -475,6 +481,38 @@ pub async fn insert_airpressure_all(
 
     Ok(())
 }
+
+// ++++++++++++++ Lightintensity - SECTION +++++++++++++++++++++
+
+pub async fn insert_light_intensity<'a>(
+    pool: &'a Pool<Postgres>,
+    api_light_measure: &api::SensorSingleSimpleMeasure,
+) -> anyhow::Result<()> {
+    let (sensor_ref, mut db_temp): (String, LightIntensity) = (&*api_light_measure).model_into();
+
+    if let Err(e) = insert_simple_measurement(
+        pool,
+        "light intensity",
+        &sensor_ref,
+        &mut db_temp,
+        repository::insert_single_sensor_lightintensity,
+    )
+    .await
+    {
+        error!(
+            "Could not insert light intensities from mq publish. error: {}",
+            e
+        );
+    }
+
+    info!(
+        "sensor light intensities: {}",
+        serde_json::to_string(api_light_measure).unwrap()
+    );
+    Ok(())
+}
+
+
 
 // ++++++++++++++ Chip temperature - SECTION +++++++++++++++++++++
 
