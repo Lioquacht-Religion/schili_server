@@ -69,6 +69,8 @@ CREATE TABLE light_intensities(
 	measure_time timestamp NOT NULL
 );
 
+ALTER TABLE light_intensities ALTER COLUMN light_intensity TYPE numeric(32,9);
+
 CREATE TABLE battery_voltages(
 	battery_voltage_id bigint PRIMARY KEY
 	GENERATED ALWAYS AS IDENTITY,
