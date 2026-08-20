@@ -79,6 +79,7 @@ pub trait DBSimpleMeasurement {
     fn new(measurement: BigDecimal, measure_time: NaiveDateTime) -> Self;
     fn measurement(&self) -> &BigDecimal;
     fn measure_time(&self) -> NaiveDateTime;
+    fn rounding_places() -> i64;
 }
 
 #[derive(Debug, FromRow)]
@@ -103,6 +104,9 @@ impl DBSimpleMeasurement for SimpleMeasurement{
     fn measure_time(&self) -> NaiveDateTime {
         self.measure_time
     }
+    fn rounding_places() -> i64 {
+        18
+    }
 }
 
 pub struct Temperature {
@@ -121,6 +125,9 @@ impl DBSimpleMeasurement for Temperature {
     }
     fn measure_time(&self) -> NaiveDateTime {
         self.measure_time
+    }
+    fn rounding_places() -> i64 {
+        3
     }
 }
 
@@ -141,6 +148,9 @@ impl DBSimpleMeasurement for Humidity {
     fn measure_time(&self) -> NaiveDateTime {
         self.measure_time
     }
+    fn rounding_places() -> i64 {
+        3
+    }
 }
 
 pub struct AirPressure {
@@ -159,6 +169,9 @@ impl DBSimpleMeasurement for AirPressure {
     }
     fn measure_time(&self) -> NaiveDateTime {
         self.measure_time
+    }
+    fn rounding_places() -> i64 {
+        3
     }
 }
 
@@ -179,6 +192,9 @@ impl DBSimpleMeasurement for LightIntensity{
     fn measure_time(&self) -> NaiveDateTime {
         self.measure_time
     }
+    fn rounding_places() -> i64 {
+        9
+    }
 }
 
 pub struct ChipTemperature {
@@ -198,6 +214,9 @@ impl DBSimpleMeasurement for ChipTemperature {
     fn measure_time(&self) -> NaiveDateTime {
         self.measure_time
     }
+    fn rounding_places() -> i64 {
+        3
+    }
 }
 
 pub struct BatteryVoltage {
@@ -216,6 +235,9 @@ impl DBSimpleMeasurement for BatteryVoltage {
     }
     fn measure_time(&self) -> NaiveDateTime {
         self.measure_time
+    }
+    fn rounding_places() -> i64 {
+        6
     }
 }
 

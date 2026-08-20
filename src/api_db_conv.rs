@@ -82,7 +82,7 @@ impl<T: DBSimpleMeasurement> ModelFrom<&api::SensorSimpleMeasurements> for (Stri
             .measurements
             .iter()
             .map(|t| {
-                DBSimpleMeasurement::new(t.measurement.clone(), t.measure_time.naive_utc().clone())
+                DBSimpleMeasurement::new(t.measurement.round(T::rounding_places()), t.measure_time.naive_utc().clone())
             })
             .collect();
         (value.sensor_reference.clone(), temps)
