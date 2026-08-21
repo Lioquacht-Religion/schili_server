@@ -1,5 +1,7 @@
 // config.rs
 
+use std::path::PathBuf;
+
 use serde::Deserialize;
 use tokio::sync::OnceCell;
 
@@ -22,6 +24,12 @@ pub struct Config {
     database: DBConfig,
     pub mqtt: MQTTConfig,
     pub email: EmailConfig,
+    pub logging: LoggingConfig,
+}
+
+#[derive(Deserialize)]
+pub struct LoggingConfig {
+    pub file: Option<PathBuf>
 }
 
 #[derive(Deserialize)]

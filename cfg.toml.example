@@ -3,6 +3,7 @@
 [http_service]
 host = "localhost" 
 port = 8080
+cors_hosts = []
 
 [database]
 connection_string = "postgres://user:password@localhost/database_name"
@@ -22,3 +23,5 @@ author_name = "bob"
 from_address = "example@gmail.com"
 to_addresses = "example@gmail.com"
 
+[logging]
+file = "logs/schili_server/output.log"

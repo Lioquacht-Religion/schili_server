@@ -1,4 +1,6 @@
 /target
 /dist
+/logs
 cfg.toml
 mosquitto.conf
+
