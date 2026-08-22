@@ -17,8 +17,10 @@ async fn main() -> std::io::Result<()> {
                     message
             ));
         })
-        .level(log::LevelFilter::Debug)
         .chain(std::io::stdout());
+    if let Some(log_level_filter) = &config.logging.log_level{
+        dispatch_logger = dispatch_logger.level(log_level_filter.to_log_level_filter());
+    }
     if let Some(log_file) = &config.logging.file{
         dispatch_logger = dispatch_logger
             .chain(fern::log_file(log_file)?)

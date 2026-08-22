@@ -24,4 +24,5 @@ from_address = "example@gmail.com"
 to_addresses = "example@gmail.com"
 
 [logging]
+log_level = "Info"
 file = "logs/schili_server/output.log"

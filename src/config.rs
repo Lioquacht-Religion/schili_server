@@ -27,8 +27,38 @@ pub struct Config {
     pub logging: LoggingConfig,
 }
 
+#[derive(Deserialize, Clone, Copy)]
+pub enum LogLevelFilter {
+    /// A level lower than all log levels.
+    Off,
+    /// Corresponds to the `Error` log level.
+    Error,
+    /// Corresponds to the `Warn` log level.
+    Warn,
+    /// Corresponds to the `Info` log level.
+    Info,
+    /// Corresponds to the `Debug` log level.
+    Debug,
+    /// Corresponds to the `Trace` log level.
+    Trace,
+}
+
+impl LogLevelFilter{
+    pub fn to_log_level_filter(self) -> log::LevelFilter{
+        match self{
+            LogLevelFilter::Off => log::LevelFilter::Off,
+            LogLevelFilter::Error => log::LevelFilter::Error,
+            LogLevelFilter::Warn => log::LevelFilter::Warn,
+            LogLevelFilter::Info => log::LevelFilter::Info,
+            LogLevelFilter::Debug => log::LevelFilter::Debug,
+            LogLevelFilter::Trace => log::LevelFilter::Trace,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct LoggingConfig {
+    pub log_level: Option<LogLevelFilter>,
     pub file: Option<PathBuf>
 }
 
