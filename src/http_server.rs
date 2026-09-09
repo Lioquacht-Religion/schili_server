@@ -7,6 +7,7 @@ use actix_web::{
     App, HttpServer, Responder, get, http, middleware::Logger, post, web::{self, ThinData}
 };
 use anyhow::anyhow;
+use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use log::error;
 use sqlx::{Pool, Postgres};
 
@@ -46,6 +47,7 @@ pub async fn start_http_server() -> std::io::Result<()> {
             .service(post_temperature_all)
             .service(get_sensor_measurements_range)
             .service(get_sensor_avg_simple_measurement_interval_in_range)
+            .service(get_current_datetime)
     })
     .bind((config.http_service.host.as_str(), config.http_service.port))?
     .run()
@@ -59,6 +61,12 @@ struct AppState {
 async fn index(data: web::Data<AppState>) -> String {
     let app_name = &data.app_name;
     format!("Hello {app_name}!")
+}
+
+#[get("/datetime/current/local")]
+async fn get_current_datetime() -> actix_web::Result<impl Responder, ApiError> {
+    let current_datetime = Local::now();
+    Ok(web::Json(current_datetime))
 }
 
 #[post("/sensor/add")]
