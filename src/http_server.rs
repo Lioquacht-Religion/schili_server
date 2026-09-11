@@ -7,7 +7,7 @@ use actix_web::{
     App, HttpServer, Responder, get, http, middleware::Logger, post, web::{self, ThinData}
 };
 use anyhow::anyhow;
-use chrono::{DateTime, Local, NaiveDateTime, Utc};
+use chrono::Local;
 use log::error;
 use sqlx::{Pool, Postgres};
 
