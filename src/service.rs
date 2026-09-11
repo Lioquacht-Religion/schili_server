@@ -630,7 +630,8 @@ pub async fn insert_bundled_measurements(
         .map_err(|_| vec![anyhow!("Could not find sensor by reference='{}'.", sensor_ref)])?;
 
     let mut errors: Vec<anyhow::Error> = Vec::new();
-    for m in api_measurements.measurements.iter(){
+    for m in api_measurements.measurements.iter_mut(){
+        m.measure.measure_time = Utc::now();
         if let Err(e) = insert_measurement(pool, sensor.sensor_id, m.sensor_type, &m.measure).await {
             errors.push(e);
         }
