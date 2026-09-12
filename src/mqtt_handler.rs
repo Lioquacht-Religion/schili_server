@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{Local, TimeZone, Utc};
 use log::{error, info};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS, StateError};
 use schili_api::mq_topics::{
@@ -163,9 +163,8 @@ async fn handle_publish(pool: &Pool<Postgres>, publish: &Publish) -> anyhow::Res
         service::insert_bundled_measurements(pool, &mut sensor).await?;
     }
     if publish.topic.contains(&TOPICS.error) {
-        let mut sensor_error= extract_sensor_error(&publish)
+        let sensor_error= extract_sensor_error(&publish)
             .map_err(|e| vec![e])?;
-        sensor_error.error.error_time = Utc::now();
         let _ = service::insert_sensor_error(pool, &sensor_error).await
             .map_err(|e| errors.push(e));
     }
