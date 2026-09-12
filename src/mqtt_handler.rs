@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 
-use chrono::{Local, TimeZone, Utc};
 use log::{error, info};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS, StateError};
 use schili_api::mq_topics::{

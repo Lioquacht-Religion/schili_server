@@ -11,7 +11,7 @@ use chrono::Local;
 use log::error;
 use sqlx::{Pool, Postgres};
 
-use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, MeasureDateTime, SensorType};
+use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SensorType};
 
 use crate::{
     config, database, error::{ApiError, DateRangeError}, service::{self}
@@ -65,7 +65,7 @@ async fn index(data: web::Data<AppState>) -> String {
 
 #[get("/datetime/current/local")]
 async fn get_current_datetime() -> actix_web::Result<impl Responder, ApiError> {
-    let current_datetime = Local::now().fixed_offset();
+    let current_datetime = Local::now().naive_local();
     Ok(web::Json(current_datetime))
 }
 
