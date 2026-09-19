@@ -20,6 +20,15 @@ CREATE TABLE sensor_types_link (
 	sensor_type sensor_type NOT NULL
 );
 
+ALTER TABLE sensor_types_link ADD COLUMN IF NOT EXISTS warn_high_num numeric;
+ALTER TABLE sensor_types_link ADD COLUMN IF NOT EXISTS warn_high_timeout interval;
+ALTER TABLE sensor_types_link ADD COLUMN IF NOT EXISTS warn_low_num numeric;
+ALTER TABLE sensor_types_link ADD COLUMN IF NOT EXISTS warn_low_timeout interval;
+ALTER TABLE sensor_types_link ADD COLUMN IF NOT EXISTS warn_high_increase_num numeric;
+ALTER TABLE sensor_types_link ADD COLUMN IF NOT EXISTS warn_high_increase_search_interval interval;
+ALTER TABLE sensor_types_link ADD COLUMN IF NOT EXISTS warn_low_increase_num numeric;
+ALTER TABLE sensor_types_link ADD COLUMN IF NOT EXISTS warn_low_increase_search_interval interval;
+
 CREATE TABLE chip_temperatures (
 	chip_temperature_id bigint PRIMARY KEY
 	GENERATED ALWAYS AS IDENTITY,

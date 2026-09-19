@@ -3,7 +3,7 @@
 use std::str::FromStr;
 
 use anyhow::{Result, anyhow};
-use chrono::{NaiveDateTime, TimeDelta, Utc};
+use chrono::{Local, NaiveDateTime, TimeDelta, Utc};
 use sqlx::{PgPool, Pool, Postgres, Row, postgres::{PgRow, types::PgInterval}, prelude::FromRow, types::BigDecimal};
 
 pub async fn start_sql_query(
@@ -853,7 +853,7 @@ pub async fn find_sensor_avg_simple_measures_by_intervals_in_timerange(
 pub async fn find_sensor_last_temperature_before_at_datetime(
     pool: &PgPool,
     sensor_id: i32,
-    before_at_datetime: &chrono::DateTime<Utc>,
+    before_at_datetime: &chrono::DateTime<Local>,
 ) -> std::result::Result<Temperature, Box<dyn std::error::Error>> {
     match sqlx::query_as!(
         Temperature,
@@ -865,7 +865,7 @@ pub async fn find_sensor_last_temperature_before_at_datetime(
         ORDER BY t.measure_time DESC LIMIT 1
         "#,
         sensor_id,
-        before_at_datetime.naive_utc(),
+        before_at_datetime.naive_local(),
     )
     .fetch_one(pool)
     .await

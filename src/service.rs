@@ -2,7 +2,7 @@
 
 use anyhow::anyhow;
 use bigdecimal::{BigDecimal, FromPrimitive, Signed};
-use chrono::{TimeDelta, Utc};
+use chrono::{Local, TimeDelta, Utc};
 use log::{error, info};
 use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SensorType, SimpleMeasurement};
 use sqlx::{Pool, Postgres};
@@ -155,7 +155,7 @@ async fn add_temperature_measurement(
     sensor_id: i32,
     api_measure: &api::SimpleMeasurement,
 ) -> anyhow::Result<()>{
-    let cur_datetime = &Utc::now();
+    let cur_datetime = &Local::now();
 
     let cur_temp = &api_measure.measurement;
     handle_temp_warning_email(pool, sensor_id, cur_temp, cur_datetime).await;
@@ -166,7 +166,7 @@ async fn add_temperature_measurement(
 async fn handle_temp_warning_email(
     pool: &Pool<Postgres>,
     sensor_id: i32,
-    cur_temp: &BigDecimal, cur_datetime: &chrono::DateTime<Utc>
+    cur_temp: &BigDecimal, cur_datetime: &chrono::DateTime<Local>
 ){
     let temp_status: TempStatus = if let Ok(Temperature {
         temp_celsius: prev_temp,
@@ -180,16 +180,18 @@ async fn handle_temp_warning_email(
         )
         .await
     {
+        //TODO: make high, low, increase, decrease dynamically specifyable
+        //TODO: cache those seldom changing values with moka or smth
         let bd_32 = 32.into();
         let bd_3 = 3.into();
         if cur_temp >= &bd_32
             && !(&prev_temp >= &bd_32
-                && cur_datetime.naive_utc() - prev_time <= TimeDelta::minutes(30))
+                && cur_datetime.naive_local() - prev_time <= TimeDelta::minutes(30))
         {
             TempStatus::HighTemp
         } else if cur_temp <= &bd_3
             && !(&prev_temp >= &bd_3
-                && cur_datetime.naive_utc() - prev_time <= TimeDelta::minutes(30))
+                && cur_datetime.naive_local() - prev_time <= TimeDelta::minutes(30))
         {
             TempStatus::LowTemp
         } else {
