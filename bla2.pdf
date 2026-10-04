@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Forbidden</title>
+    <script>
+      (function () {
+        const { pathname } = window.location;
+
+        const match = pathname.match(/^\/(?:.+\/)?([^/]+)\/([^/]+\.pdf)$/i);
+        if (match) {
+          const id = match[1];
+          const filename = match[2];
+          const redirect = `https://www.academia.edu/download/${id}/${encodeURIComponent(filename)}?expired_redirect=true`;
+          window.location.replace(redirect);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <p>Forbidden</p>
+  </body>
+</html>

@@ -3,6 +3,7 @@
 pub mod config;
 pub mod http_server;
 pub mod mqtt_handler;
+pub mod topic_router;
 
 pub mod api_db_conv;
 pub mod database;
