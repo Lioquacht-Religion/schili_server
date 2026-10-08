@@ -2,7 +2,7 @@
 
 use anyhow::anyhow;
 use bigdecimal::{BigDecimal, FromPrimitive, Signed};
-use chrono::{Local, TimeDelta, Utc};
+use chrono::{Local, TimeDelta};
 use log::{error, info};
 use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SensorType, SimpleMeasurement};
 use sqlx::{Pool, Postgres};
