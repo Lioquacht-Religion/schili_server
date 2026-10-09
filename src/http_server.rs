@@ -4,17 +4,24 @@ use std::str::FromStr;
 
 use actix_cors::Cors;
 use actix_web::{
-    App, HttpServer, Responder, get, http, middleware::Logger, post, web::{self, ThinData}
+    App, HttpServer, Responder, get, http,
+    middleware::Logger,
+    post,
+    web::{self, ThinData},
 };
 use anyhow::anyhow;
 use chrono::Local;
 use log::error;
 use sqlx::{Pool, Postgres};
 
-use schili_api::api::{self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SensorType};
+use schili_api::api::{
+    self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SensorType,
+};
 
 use crate::{
-    config, database, error::{ApiError, DateRangeError}, service::{self}
+    config, database,
+    error::{ApiError, DateRangeError},
+    service::{self},
 };
 
 pub async fn start_http_server() -> std::io::Result<()> {
@@ -23,14 +30,14 @@ pub async fn start_http_server() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         let mut cors = Cors::default();
-        for cors_host in config.http_service.cors_hosts.iter(){
+        for cors_host in config.http_service.cors_hosts.iter() {
             cors = cors.allowed_origin(cors_host);
         }
-        let cors = cors.allowed_methods(vec!["GET", "POST", "UPDATE"])
+        let cors = cors
+            .allowed_methods(vec!["GET", "POST", "UPDATE"])
             .allowed_headers(vec![http::header::AUTHORIZATION, http::header::ACCEPT])
             .allowed_header(http::header::CONTENT_TYPE)
             .max_age(3600);
-
 
         App::new()
             .wrap(Logger::new("%a %{User-Agent}i"))
@@ -109,9 +116,8 @@ async fn get_all_sensors_filtered(
     api_sensor_types: web::Json<Vec<api::SensorType>>,
 ) -> actix_web::Result<impl Responder, ApiError> {
     let sensor_name_filter = format!("%{}%", path.into_inner());
-    let sensor = service::get_all_sensors_filtered(
-        &pool, &sensor_name_filter, &api_sensor_types
-    ).await?;
+    let sensor =
+        service::get_all_sensors_filtered(&pool, &sensor_name_filter, &api_sensor_types).await?;
     Ok(web::Json(sensor))
 }
 
@@ -137,14 +143,20 @@ async fn post_humidity_all(
     }
 }
 
-#[get("/sensor/measurement/range/{measurement_kind}/{sensor_reference}/{start_datetime}/{end_datetime}")]
+#[get(
+    "/sensor/measurement/range/{measurement_kind}/{sensor_reference}/{start_datetime}/{end_datetime}"
+)]
 async fn get_sensor_measurements_range(
     path: web::Path<(String, String, i64, i64)>,
     ThinData(pool): web::ThinData<Pool<Postgres>>,
 ) -> actix_web::Result<impl Responder, ApiError> {
     let (measurement_kind, sensor_ref, start, end) = path.into_inner();
-    let measurement_kind = SensorType::from_str(&measurement_kind)
-        .map_err(|_| anyhow!("Measurement kind does not exist: {}", measurement_kind.as_str()))?;
+    let measurement_kind = SensorType::from_str(&measurement_kind).map_err(|_| {
+        anyhow!(
+            "Measurement kind does not exist: {}",
+            measurement_kind.as_str()
+        )
+    })?;
     let start_datetime = chrono::DateTime::from_timestamp(start, 0);
     let end_datetime = chrono::DateTime::from_timestamp(end, 0);
     let temp_range =
@@ -167,19 +179,26 @@ async fn get_sensor_measurements_range(
     }
 }
 
-#[get("/sensor/measurement/avg/interval/range/{measurement_kind}/{sensor_reference}/{start_datetime}/{end_datetime}/{interval}")]
+#[get(
+    "/sensor/measurement/avg/interval/range/{measurement_kind}/{sensor_reference}/{start_datetime}/{end_datetime}/{interval}"
+)]
 async fn get_sensor_avg_simple_measurement_interval_in_range(
     path: web::Path<(String, String, i64, i64, i64)>,
     ThinData(pool): web::ThinData<Pool<Postgres>>,
 ) -> actix_web::Result<impl Responder, ApiError> {
     let (measurement_kind, sensor_ref, start, end, interval) = path.into_inner();
-    let measurement_kind = SensorType::from_str(&measurement_kind).map_err(|_| anyhow!("Measurement kind does not exist: {}", measurement_kind.as_str()))?;
+    let measurement_kind = SensorType::from_str(&measurement_kind).map_err(|_| {
+        anyhow!(
+            "Measurement kind does not exist: {}",
+            measurement_kind.as_str()
+        )
+    })?;
     let start_datetime = chrono::DateTime::from_timestamp(start, 0);
     let end_datetime = chrono::DateTime::from_timestamp(end, 0);
     let interval = chrono::TimeDelta::milliseconds(interval);
     let temp_range =
         if let (Some(start_datetime), Some(end_datetime)) = (start_datetime, end_datetime) {
-            GetSensorSimpleMeasuresIntervalsRange{
+            GetSensorSimpleMeasuresIntervalsRange {
                 sensor_reference: sensor_ref,
                 start_datetime,
                 end_datetime,
@@ -192,10 +211,19 @@ async fn get_sensor_avg_simple_measurement_interval_in_range(
             )))));
         };
 
-    match service::get_sensor_avg_measurements_by_intervals_in_range(&pool, &temp_range, measurement_kind).await {
+    match service::get_sensor_avg_measurements_by_intervals_in_range(
+        &pool,
+        &temp_range,
+        measurement_kind,
+    )
+    .await
+    {
         Ok(api_temps) => Ok(web::Json(api_temps)),
         Err(e) => {
-            error!("Error while trying to search for intervals in timerange: {}", e);
+            error!(
+                "Error while trying to search for intervals in timerange: {}",
+                e
+            );
             Err(ApiError::from(e))
         }
     }

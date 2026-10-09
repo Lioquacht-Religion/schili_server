@@ -1,31 +1,36 @@
 // topic_router.rs
 
-use std::{fmt, hash::{DefaultHasher, Hasher}, pin::Pin, str::Chars};
+use std::{
+    fmt,
+    hash::{DefaultHasher, Hasher},
+    pin::Pin,
+    str::Chars,
+};
 
-pub mod macros{
-    macro_rules! into_async{
+pub mod macros {
+    #[allow(unused_macros)]
+    macro_rules! into_async {
         ($func:expr) => {
-            |topic_values| Box::pin(async{
-                $func(topic_values).await
-            })
+            |topic_values| Box::pin(async { $func(topic_values).await })
         };
     }
+    #[allow(unused_imports)]
     pub(crate) use into_async;
 
-    macro_rules! into_async1{
+    #[allow(unused_macros)]
+    macro_rules! into_async1 {
         ($func:expr) => {
-            |topic_values, input1| Box::pin(async{
-                $func(topic_values, input1).await
-            })
+            |topic_values, input1| Box::pin(async { $func(topic_values, input1).await })
         };
     }
+    #[allow(unused_imports)]
     pub(crate) use into_async1;
 
-    macro_rules! into_async2{
+    macro_rules! into_async2 {
         ($func:expr) => {
-            |topic_values, input1, input2| Box::pin(async{
-                $func(topic_values, input1, input2).await
-            })
+            |topic_values, input1, input2| {
+                Box::pin(async { $func(topic_values, input1, input2).await })
+            }
         };
     }
     pub(crate) use into_async2;
@@ -35,49 +40,53 @@ const ROOT_NODE_ID: NodeIdType = NodeIdType::Ident(NodeId(0));
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-pub type NodeHandler = for<'o> fn(&'o[TopicValue<'o>])
-    -> BoxFuture<'o, anyhow::Result<()>
->;
+pub type NodeHandler = for<'o> fn(&'o [TopicValue<'o>]) -> BoxFuture<'o, anyhow::Result<()>>;
 
-pub trait StoredFnTrait{
+pub trait StoredFnTrait {
     type Input<'new>: Copy;
     type Result<'ret>;
     fn exec<'new, 'v>(
-        &self, topice_values: &'v [TopicValue<'new>],
-        input: Self::Input<'new>
+        &self,
+        topice_values: &'v [TopicValue<'new>],
+        input: Self::Input<'new>,
     ) -> Self::Result<'v>;
 }
 
-impl StoredFnTrait for for<'o, 'v> fn(&'v[TopicValue<'o>]) -> BoxFuture<'v, anyhow::Result<()>>{
+impl StoredFnTrait for for<'o, 'v> fn(&'v [TopicValue<'o>]) -> BoxFuture<'v, anyhow::Result<()>> {
     type Input<'new> = ();
     type Result<'ret> = BoxFuture<'ret, anyhow::Result<()>>;
     fn exec<'new, 'v>(
-        &self, topice_values: &'v [TopicValue<'new>],
-        _input: Self::Input<'new>
+        &self,
+        topice_values: &'v [TopicValue<'new>],
+        _input: Self::Input<'new>,
     ) -> Self::Result<'v> {
         self(topice_values)
     }
 }
 
-impl<T1: 'static> StoredFnTrait for for<'o, 'v> fn(&'v [TopicValue<'o>], &'o T1) 
--> BoxFuture<'v, anyhow::Result<()>>{
+impl<T1: 'static> StoredFnTrait
+    for for<'o, 'v> fn(&'v [TopicValue<'o>], &'o T1) -> BoxFuture<'v, anyhow::Result<()>>
+{
     type Input<'new> = &'new T1;
     type Result<'ret> = BoxFuture<'ret, anyhow::Result<()>>;
     fn exec<'new, 'v>(
-        &self, topice_values: &'v [TopicValue<'new>],
-        input: Self::Input<'new>
+        &self,
+        topice_values: &'v [TopicValue<'new>],
+        input: Self::Input<'new>,
     ) -> Self::Result<'v> {
         self(topice_values, input)
     }
 }
 
-impl<T1: 'static, T2: 'static> StoredFnTrait for for<'o, 'v> fn(&'v [TopicValue<'o>], &'o T1, &'o T2) 
--> BoxFuture<'v, anyhow::Result<()>>{
+impl<T1: 'static, T2: 'static> StoredFnTrait
+    for for<'o, 'v> fn(&'v [TopicValue<'o>], &'o T1, &'o T2) -> BoxFuture<'v, anyhow::Result<()>>
+{
     type Input<'new> = (&'new T1, &'new T2);
     type Result<'ret> = BoxFuture<'ret, anyhow::Result<()>>;
     fn exec<'new, 'v>(
-        &self, topice_values: &'v [TopicValue<'new>],
-        input: Self::Input<'new>
+        &self,
+        topice_values: &'v [TopicValue<'new>],
+        input: Self::Input<'new>,
     ) -> Self::Result<'v> {
         self(topice_values, input.0, input.1)
     }
@@ -85,31 +94,31 @@ impl<T1: 'static, T2: 'static> StoredFnTrait for for<'o, 'v> fn(&'v [TopicValue<
 
 ///example topic route: {var1}/routepart1/routepart2/[enumval1|enumval2|enumval3]/routepart3
 #[derive(Debug)]
-pub struct TopicRouter<F>{
+pub struct TopicRouter<F> {
     str_buffer: String,
     ident_nodes: Vec<IdentNode<F>>,
     var_nodes: Vec<VarNode<F>>,
     root: NodeId,
 }
 
-impl<F> TopicRouter<F>{ 
-    pub fn debug_print(&self){
+impl<F> TopicRouter<F> {
+    pub fn debug_print(&self) {
         let mut p_node_ids = vec![ROOT_NODE_ID];
-        loop{
-            if p_node_ids.is_empty(){
+        loop {
+            if p_node_ids.is_empty() {
                 break;
             }
             let mut next_node_ids = Vec::new();
-            for p_node_id in p_node_ids.iter(){
-                let children= match p_node_id{
+            for p_node_id in p_node_ids.iter() {
+                let children = match p_node_id {
                     NodeIdType::Ident(node_id) => &self.ident_nodes[node_id.0].children,
                     NodeIdType::Variable(node_id) => &self.var_nodes[node_id.0].children,
                 };
 
-                for (_hash, c_node_id) in children.ident_node_ids.node_ids.iter(){
+                for (_hash, c_node_id) in children.ident_node_ids.node_ids.iter() {
                     next_node_ids.push(NodeIdType::Ident(*c_node_id));
                 }
-                if let Some(var_node_id) = children.var_node_id{
+                if let Some(var_node_id) = children.var_node_id {
                     next_node_ids.push(NodeIdType::Variable(var_node_id));
                 }
             }
@@ -117,11 +126,11 @@ impl<F> TopicRouter<F>{
         }
     }
 
-    pub fn parse_route(route: &str) -> Result<Vec<TemplateSegment>, TopicRouteParseError>{
+    pub fn parse_route(route: &str) -> Result<Vec<TemplateSegment>, TopicRouteParseError> {
         let mut segments = Vec::new();
         let mut parser = Parser::new(route);
-        loop{
-            match parser.advance_route_template_parser(route){
+        loop {
+            match parser.advance_route_template_parser(route) {
                 Ok(Some(segment)) => segments.push(segment),
                 Ok(None) => {
                     break;
@@ -135,10 +144,13 @@ impl<F> TopicRouter<F>{
     }
 }
 
-impl<F: StoredFnTrait + Copy> TopicRouter<F>{
-    pub fn new() -> Self{
-        let root_node = IdentNode{
-            segment: StrSegment { kind: StrSegmentKind::Str, ident: IdentRange { start: 0, end: 0 } },
+impl<F: StoredFnTrait + Copy> TopicRouter<F> {
+    pub fn new() -> Self {
+        let root_node = IdentNode {
+            segment: StrSegment {
+                kind: StrSegmentKind::Str,
+                ident: IdentRange { start: 0, end: 0 },
+            },
             handler: None,
             children: ChildNodes::new(),
         };
@@ -150,7 +162,11 @@ impl<F: StoredFnTrait + Copy> TopicRouter<F>{
         }
     }
 
-    fn add_ident_node(&mut self, child_str: &str, str_segment_kind: StrSegmentKind) -> (Hash, NodeId){
+    fn add_ident_node(
+        &mut self,
+        child_str: &str,
+        str_segment_kind: StrSegmentKind,
+    ) -> (Hash, NodeId) {
         let mut hasher = DefaultHasher::new();
         hasher.write(child_str.as_bytes());
         let hash = hasher.finish();
@@ -158,98 +174,106 @@ impl<F: StoredFnTrait + Copy> TopicRouter<F>{
         self.str_buffer.push_str(child_str);
         let end = self.str_buffer.len();
         let child_node_id = NodeId(self.ident_nodes.len());
-        let child = IdentNode{
-            segment: StrSegment { 
+        let child = IdentNode {
+            segment: StrSegment {
                 kind: str_segment_kind,
-                ident: IdentRange { start, end } 
+                ident: IdentRange { start, end },
             },
             children: ChildNodes::new(),
-            handler: None
+            handler: None,
         };
         self.ident_nodes.push(child);
         (Hash(hash), child_node_id)
     }
 
-    fn add_variable_node(&mut self, datatype: SegmentVarType) -> NodeId{
+    fn add_variable_node(&mut self, datatype: SegmentVarType) -> NodeId {
         let child_node_id = NodeId(self.var_nodes.len());
-        let child = VarNode{
+        let child = VarNode {
             segment: VarSegment { datatype },
             children: ChildNodes::new(),
-            handler: None, 
+            handler: None,
         };
         self.var_nodes.push(child);
         child_node_id
     }
 
     fn add_child_segment_to_node(
-        &mut self, route: &str, segment: &TemplateSegment, 
+        &mut self,
+        route: &str,
+        segment: &TemplateSegment,
         parent_node_id: NodeId,
-    ) -> NodeInsertResult{
-        match segment{
-            TemplateSegment::Segment { ident } =>
-                NodeInsertResult::SingleIdent(
-                    self.add_ident_segment(
-                        parent_node_id, ident.substr(route))),
+    ) -> NodeInsertResult {
+        match segment {
+            TemplateSegment::Segment { ident } => NodeInsertResult::SingleIdent(
+                self.add_ident_segment(parent_node_id, ident.substr(route)),
+            ),
             TemplateSegment::Enum { enum_values } => {
                 let mut node_ids = Vec::new();
-                for ident in enum_values.iter(){
-                    node_ids.push(
-                        self.add_ident_segment(
-                            parent_node_id, ident.substr(route)));
+                for ident in enum_values.iter() {
+                    node_ids.push(self.add_ident_segment(parent_node_id, ident.substr(route)));
                 }
                 NodeInsertResult::MultipleIdent(node_ids)
             }
-            TemplateSegment::Var { datatype } => 
-                NodeInsertResult::Variable(self.add_variable_segment(parent_node_id, *datatype)),
+            TemplateSegment::Var { datatype } => {
+                NodeInsertResult::Variable(self.add_variable_segment(parent_node_id, *datatype))
+            }
         }
     }
 
     fn add_child_segment_to_enum_parent_nodes(
-        &mut self, route: &str, segment: &TemplateSegment, 
+        &mut self,
+        route: &str,
+        segment: &TemplateSegment,
         parent_node_ids: &[NodeId],
-    ) -> NodeInsertResult{
-        match segment{
-            TemplateSegment::Segment { ident } => 
-                NodeInsertResult::SingleIdent(
-                    self.add_ident_segment_to_enum_parent_nodes(
-                        parent_node_ids, ident.substr(route))
-                ),
+    ) -> NodeInsertResult {
+        match segment {
+            TemplateSegment::Segment { ident } => NodeInsertResult::SingleIdent(
+                self.add_ident_segment_to_enum_parent_nodes(parent_node_ids, ident.substr(route)),
+            ),
             TemplateSegment::Enum { enum_values } => {
                 let mut node_ids = Vec::new();
-                for ident in enum_values.iter(){
-                    node_ids.push(
-                        self.add_ident_segment_to_enum_parent_nodes(
-                            parent_node_ids, ident.substr(route))
-                    );
+                for ident in enum_values.iter() {
+                    node_ids.push(self.add_ident_segment_to_enum_parent_nodes(
+                        parent_node_ids,
+                        ident.substr(route),
+                    ));
                 }
                 NodeInsertResult::MultipleIdent(node_ids)
             }
-            TemplateSegment::Var { datatype } => 
-                NodeInsertResult::Variable(self.add_var_segment_to_enum_parent_nodes(parent_node_ids, *datatype)),
+            TemplateSegment::Var { datatype } => NodeInsertResult::Variable(
+                self.add_var_segment_to_enum_parent_nodes(parent_node_ids, *datatype),
+            ),
         }
     }
 
     fn add_ident_segment_to_enum_parent_nodes(
-        &mut self, 
+        &mut self,
         parent_node_ids: &[NodeId],
         child_ident: &str,
-    ) -> NodeId{
+    ) -> NodeId {
         let mut child_node_id = None;
-        for parent_node_id in parent_node_ids.iter(){
+        for parent_node_id in parent_node_ids.iter() {
             let parent_children = &self.ident_nodes[parent_node_id.0].children;
-            if let Some(node_id) = parent_children.ident_node_ids.get(&self.str_buffer, &self.ident_nodes, &child_ident){
+            if let Some(node_id) = parent_children.ident_node_ids.get(
+                &self.str_buffer,
+                &self.ident_nodes,
+                &child_ident,
+            ) {
                 child_node_id = Some(node_id);
                 break;
             }
-        };
-        let (hash, child_node_id) = match child_node_id{
+        }
+        let (hash, child_node_id) = match child_node_id {
             Some(hash_node_id) => hash_node_id,
-            None => 
-                self.add_ident_node(child_ident, StrSegmentKind::Enum),
+            None => self.add_ident_node(child_ident, StrSegmentKind::Enum),
         };
-        for parent_node_id in parent_node_ids.iter(){
+        for parent_node_id in parent_node_ids.iter() {
             let parent_children = &self.ident_nodes[parent_node_id.0].children;
-            if let None = parent_children.ident_node_ids.get(&self.str_buffer, &self.ident_nodes, &child_ident){
+            if let None = parent_children.ident_node_ids.get(
+                &self.str_buffer,
+                &self.ident_nodes,
+                &child_ident,
+            ) {
                 let parent_children = &mut self.ident_nodes[parent_node_id.0].children;
                 parent_children.ident_node_ids.insert(hash, child_node_id);
             }
@@ -258,26 +282,25 @@ impl<F: StoredFnTrait + Copy> TopicRouter<F>{
     }
 
     fn add_var_segment_to_enum_parent_nodes(
-        &mut self, 
+        &mut self,
         parent_node_ids: &[NodeId],
         datatype: SegmentVarType,
-    ) -> NodeId{
+    ) -> NodeId {
         let mut child_node_id = None;
-        for parent_node_id in parent_node_ids.iter(){
+        for parent_node_id in parent_node_ids.iter() {
             let parent_children = &mut self.ident_nodes[parent_node_id.0].children;
-            if let Some(node_id) = parent_children.var_node_id{
+            if let Some(node_id) = parent_children.var_node_id {
                 child_node_id = Some(node_id);
                 break;
             }
-        };
-        let child_node_id = match child_node_id{
+        }
+        let child_node_id = match child_node_id {
             Some(hash_node_id) => hash_node_id,
-            None => 
-                self.add_variable_node(datatype),
+            None => self.add_variable_node(datatype),
         };
-        for parent_node_id in parent_node_ids.iter(){
+        for parent_node_id in parent_node_ids.iter() {
             let parent_children = &self.ident_nodes[parent_node_id.0].children;
-            if let None = parent_children.var_node_id{
+            if let None = parent_children.var_node_id {
                 let parent_children = &mut self.ident_nodes[parent_node_id.0].children;
                 parent_children.var_node_id = Some(child_node_id);
             }
@@ -285,13 +308,12 @@ impl<F: StoredFnTrait + Copy> TopicRouter<F>{
         child_node_id
     }
 
-    fn add_ident_segment(
-        &mut self, 
-        parent_node_id: NodeId,
-        ident: &str,
-    ) -> NodeId{
+    fn add_ident_segment(&mut self, parent_node_id: NodeId, ident: &str) -> NodeId {
         let parent_children = &self.ident_nodes[parent_node_id.0].children;
-        match parent_children.ident_node_ids.get(&self.str_buffer, &self.ident_nodes, &ident){
+        match parent_children
+            .ident_node_ids
+            .get(&self.str_buffer, &self.ident_nodes, &ident)
+        {
             Some((_hash, node_id)) => node_id,
             None => {
                 let (hash, child_node_id) = self.add_ident_node(&ident, StrSegmentKind::Str);
@@ -302,16 +324,14 @@ impl<F: StoredFnTrait + Copy> TopicRouter<F>{
         }
     }
 
-    fn add_variable_segment(
-        &mut self, 
-        parent_node_id: NodeId,
-        datatype: SegmentVarType,
-    ) -> NodeId{
+    fn add_variable_segment(&mut self, parent_node_id: NodeId, datatype: SegmentVarType) -> NodeId {
         let parent_children = &self.ident_nodes[parent_node_id.0].children;
-        match parent_children.var_node_id{
+        match parent_children.var_node_id {
             Some(node_id) => {
                 let node = &mut self.var_nodes[node_id.0];
-                if let (SegmentVarType::Str, SegmentVarType::Integer) = (datatype, node.segment.datatype){
+                if let (SegmentVarType::Str, SegmentVarType::Integer) =
+                    (datatype, node.segment.datatype)
+                {
                     node.segment.datatype = datatype;
                 };
                 node_id
@@ -325,37 +345,37 @@ impl<F: StoredFnTrait + Copy> TopicRouter<F>{
         }
     }
 
-    pub fn add_route(&mut self, route: &str, handler: F) -> Result<(), TopicRouteParseError>
-    {
+    pub fn add_route(&mut self, route: &str, handler: F) -> Result<(), TopicRouteParseError> {
         let mut parser = Parser::new(route);
-        let mut cur_node_result= NodeInsertResult::SingleIdent(self.root);
+        let mut cur_node_result = NodeInsertResult::SingleIdent(self.root);
 
-        loop{
+        loop {
             let segment = parser.advance_route_template_parser(route)?;
             if let Some(segment) = segment {
-                cur_node_result = match cur_node_result{
-                    NodeInsertResult::SingleIdent(node_id) => 
-                        self.add_child_segment_to_node(
-                            route, &segment, node_id),
-                    NodeInsertResult::MultipleIdent(node_ids) => 
-                        self.add_child_segment_to_enum_parent_nodes(
-                            route, &segment, &node_ids),
-                    NodeInsertResult::Variable(node_id) => 
-                        self.add_child_segment_to_node(
-                            route, &segment, node_id),
-                }
-            }
-            else{
-                match cur_node_result{
-                    NodeInsertResult::SingleIdent(node_id) => 
-                        self.ident_nodes[node_id.0].handler = Some(handler),
+                cur_node_result = match cur_node_result {
+                    NodeInsertResult::SingleIdent(node_id) => {
+                        self.add_child_segment_to_node(route, &segment, node_id)
+                    }
                     NodeInsertResult::MultipleIdent(node_ids) => {
-                        for node_id in node_ids{
+                        self.add_child_segment_to_enum_parent_nodes(route, &segment, &node_ids)
+                    }
+                    NodeInsertResult::Variable(node_id) => {
+                        self.add_child_segment_to_node(route, &segment, node_id)
+                    }
+                }
+            } else {
+                match cur_node_result {
+                    NodeInsertResult::SingleIdent(node_id) => {
+                        self.ident_nodes[node_id.0].handler = Some(handler)
+                    }
+                    NodeInsertResult::MultipleIdent(node_ids) => {
+                        for node_id in node_ids {
                             self.ident_nodes[node_id.0].handler = Some(handler);
                         }
                     }
-                    NodeInsertResult::Variable(node_id) => 
-                        self.var_nodes[node_id.0].handler = Some(handler),
+                    NodeInsertResult::Variable(node_id) => {
+                        self.var_nodes[node_id.0].handler = Some(handler)
+                    }
                 }
                 break;
             }
@@ -364,41 +384,44 @@ impl<F: StoredFnTrait + Copy> TopicRouter<F>{
     }
 
     pub fn exec_handler_for_route<'r>(
-        &self, input: &F::Input<'r>,
-        route: &'r str
-    ) -> Result<(), TopicRouteParseError>{
+        &self,
+        input: &F::Input<'r>,
+        route: &'r str,
+    ) -> Result<(), TopicRouteParseError> {
         let mut parser = Parser::new(route);
-        self.exec_handler_for_route_inner(input,
-            route, &mut parser, ROOT_NODE_ID)
+        self.exec_handler_for_route_inner(input, route, &mut parser, ROOT_NODE_ID)
     }
 
     fn exec_handler_for_route_inner<'r: 'p, 'p>(
-        &self, input: &F::Input<'r>,
-        route: &'r str, parser: &'p mut Parser<'r>, mut cur_parent_node_id: NodeIdType,
-    ) -> Result<(), TopicRouteParseError>{
+        &self,
+        input: &F::Input<'r>,
+        route: &'r str,
+        parser: &'p mut Parser<'r>,
+        mut cur_parent_node_id: NodeIdType,
+    ) -> Result<(), TopicRouteParseError> {
         let mut topic_values = Vec::new();
-        loop{
+        loop {
             let segment = parser.advance_topic_parser(route)?;
             if let Some(ValueSegment {
                 value_type,
-                str_range 
-            }) = segment{
+                str_range,
+            }) = segment
+            {
                 let segment_str = str_range.substr(route);
-                cur_parent_node_id = if let Some(next_node_id) = 
-                    self.exec_nodes_handler(
-                        input,
-                        route, parser, cur_parent_node_id,
-                        value_type, segment_str,
-                        &mut topic_values
-                    )
-                {
+                cur_parent_node_id = if let Some(next_node_id) = self.exec_nodes_handler(
+                    input,
+                    route,
+                    parser,
+                    cur_parent_node_id,
+                    value_type,
+                    segment_str,
+                    &mut topic_values,
+                ) {
                     next_node_id
-                }
-                else{
+                } else {
                     break;
                 };
-            }
-            else{
+            } else {
                 break;
             }
         }
@@ -410,35 +433,34 @@ impl<F: StoredFnTrait + Copy> TopicRouter<F>{
         input: &F::Input<'r>,
         route: &'r str,
         parser: &'p mut Parser<'r>,
-        parent_node_id: NodeIdType, 
+        parent_node_id: NodeIdType,
         value_type: SegmentValType,
         segment_str: &'r str,
-        topic_values: &'t mut Vec<TopicValue<'r>>
-    ) -> Option<NodeIdType>{
-        let children= match parent_node_id{
+        topic_values: &'t mut Vec<TopicValue<'r>>,
+    ) -> Option<NodeIdType> {
+        let children = match parent_node_id {
             NodeIdType::Ident(id) => &self.ident_nodes[id.0].children,
             NodeIdType::Variable(id) => &self.var_nodes[id.0].children,
-        }; 
-        let ident_res = if let Some((_hash, node_id)) = children.ident_node_ids.get(
-            &self.str_buffer, &self.ident_nodes, segment_str
-        ){
+        };
+        let ident_res = if let Some((_hash, node_id)) =
+            children
+                .ident_node_ids
+                .get(&self.str_buffer, &self.ident_nodes, segment_str)
+        {
             let child_node = &self.ident_nodes[node_id.0];
-            match child_node.segment.kind{
-                StrSegmentKind::Str =>
-                    topic_values.push(TopicValue::StrVar(segment_str)),
-                StrSegmentKind::Enum => 
-                    topic_values.push(TopicValue::EnumVar(segment_str)),
+            match child_node.segment.kind {
+                StrSegmentKind::Str => topic_values.push(TopicValue::StrVar(segment_str)),
+                StrSegmentKind::Enum => topic_values.push(TopicValue::EnumVar(segment_str)),
             }
-            if let Some(handler) = &child_node.handler{
+            if let Some(handler) = &child_node.handler {
                 handler.exec(topic_values, *input);
             }
             Some(NodeIdType::Ident(node_id))
-        }
-        else{
+        } else {
             None
         };
 
-        let var_res = if let Some(var_node_id) = children.var_node_id{
+        let var_res = if let Some(var_node_id) = children.var_node_id {
             let child_node = &self.var_nodes[var_node_id.0];
 
             let int_var = matches!(child_node.segment.datatype, SegmentVarType::Integer)
@@ -450,82 +472,42 @@ impl<F: StoredFnTrait + Copy> TopicRouter<F>{
             if int_var || str_var {
                 if str_var {
                     topic_values.push(TopicValue::StrVar(segment_str));
-                }
-                else if int_var {
+                } else if int_var {
                     //TODO: should i64 parsing be done here with error handling?
                     topic_values.push(TopicValue::IntVar(segment_str.parse().unwrap_or(0)));
                 }
-                if let Some(handler) = &child_node.handler{
+                if let Some(handler) = &child_node.handler {
                     handler.exec(topic_values, *input);
                 }
                 Some(NodeIdType::Variable(var_node_id))
-            }
-            else{
+            } else {
                 None
             }
-        }
-        else{
+        } else {
             None
         };
 
         match (ident_res, var_res) {
-            (Some(ident_node_id), Some(var_node_id))=> {
-                self.exec_handler_for_route_inner(
-                    input, route, &mut parser.clone(), ident_node_id);
-                self.exec_handler_for_route_inner(
-                    input, route, &mut parser.clone(), var_node_id);
+            (Some(ident_node_id), Some(var_node_id)) => {
+                //TODO: should these errors be propagated
+                let _ = self.exec_handler_for_route_inner(input, route, &mut parser.clone(), ident_node_id);
+                let _ = self.exec_handler_for_route_inner(input, route, &mut parser.clone(), var_node_id);
                 None
             }
-            (Some(ident_node_id), None) => {
-                Some(ident_node_id)
-            }
-            (None, Some(var_node_id)) => {
-                Some(var_node_id)
-            }
+            (Some(ident_node_id), None) => Some(ident_node_id),
+            (None, Some(var_node_id)) => Some(var_node_id),
             (None, None) => None,
         }
     }
-
-    fn exec_variable_nodes_handler<'r>(
-        &self,
-        input: &F::Input<'r>,
-        parent_node_id: NodeId, 
-        segment_str: &'r str,
-        topic_values: &[TopicValue<'r>]
-    ) -> Option<NodeId>{
-        let node = &self.var_nodes[parent_node_id.0];
-        if let Some((_hash, node_id)) = node.children.ident_node_ids.get(
-            &self.str_buffer, &self.ident_nodes, segment_str
-        ){
-            let child_node = &self.ident_nodes[node_id.0];
-            if let Some(handler) = &child_node.handler{
-                handler.exec(topic_values, *input);
-            }
-            Some(node_id)
-        }
-        else{
-            None
-        }
-    }
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NodeIdType{
+enum NodeIdType {
     Ident(NodeId),
     Variable(NodeId),
 }
 
-impl NodeIdType{
-    fn id(&self) -> NodeId{
-        match self{
-            NodeIdType::Ident(node_id) => *node_id,
-            NodeIdType::Variable(node_id) => *node_id,
-        }
-    }
-}
-
-enum NodeInsertResult{
+enum NodeInsertResult {
     SingleIdent(NodeId),
     MultipleIdent(Vec<NodeId>),
     Variable(NodeId),
@@ -535,81 +517,75 @@ enum NodeInsertResult{
 struct NodeId(usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SegmentVarType{
+pub enum SegmentVarType {
     Str,
     Integer,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum TemplateSegment{
-    Segment{ident: IdentRange},
-    Enum{enum_values: Vec<IdentRange>},
-    Var{datatype: SegmentVarType},
+pub enum TemplateSegment {
+    Segment { ident: IdentRange },
+    Enum { enum_values: Vec<IdentRange> },
+    Var { datatype: SegmentVarType },
 }
 
-struct ValueSegment{
+struct ValueSegment {
     value_type: SegmentValType,
     str_range: IdentRange,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SegmentValType{
+enum SegmentValType {
     Ident,
     Integer,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct IdentRange{
+pub struct IdentRange {
     start: usize,
-    end: usize
+    end: usize,
 }
 
-impl IdentRange{
-    fn new(start: usize, end: usize) -> Self{
+impl IdentRange {
+    fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
 
-    fn substr<'a>(&self, source: &'a str) -> &'a str{
+    fn substr<'a>(&self, source: &'a str) -> &'a str {
         &source[self.start..self.end]
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum Segment{
-    Str{ident: IdentRange},
-    Var{datatype: SegmentVarType},
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StrSegmentKind{
+enum StrSegmentKind {
     Str,
     Enum,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct StrSegment{
+struct StrSegment {
     kind: StrSegmentKind,
     ident: IdentRange,
 }
 
 #[derive(Debug)]
-struct VarSegment{
+struct VarSegment {
     datatype: SegmentVarType,
 }
 
-pub enum TopicValue<'a>{
+pub enum TopicValue<'a> {
     IntVar(i64),
     StrVar(&'a str),
     EnumVar(&'a str),
 }
 
-struct NodeInner<T, F>{
+struct NodeInner<T, F> {
     segment: T,
     handler: Option<F>,
-    children: ChildNodes
+    children: ChildNodes,
 }
 
-impl<T, F> fmt::Debug for NodeInner<T, F>{
+impl<T, F> fmt::Debug for NodeInner<T, F> {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         //TODO
         Ok(())
@@ -621,14 +597,14 @@ type IdentNode<F> = NodeInner<StrSegment, F>;
 type VarNode<F> = NodeInner<VarSegment, F>;
 
 #[derive(Debug)]
-struct ChildNodes{
+struct ChildNodes {
     ident_node_ids: SortedNodeIds,
-    var_node_id: Option<NodeId>
+    var_node_id: Option<NodeId>,
 }
 
-impl ChildNodes{
-    fn new() -> Self{
-        Self{
+impl ChildNodes {
+    fn new() -> Self {
+        Self {
             ident_node_ids: SortedNodeIds::new(),
             var_node_id: None,
         }
@@ -639,41 +615,49 @@ impl ChildNodes{
 struct Hash(u64);
 
 #[derive(Debug)]
-struct SortedNodeIds{
-    node_ids: Vec<(Hash, NodeId)>
+struct SortedNodeIds {
+    node_ids: Vec<(Hash, NodeId)>,
 }
 
-impl SortedNodeIds{
-    fn new() -> Self{
-        Self { node_ids: Vec::new() }
+impl SortedNodeIds {
+    fn new() -> Self {
+        Self {
+            node_ids: Vec::new(),
+        }
     }
 
-    fn insert(&mut self, hash: Hash, node_id: NodeId){
+    fn insert(&mut self, hash: Hash, node_id: NodeId) {
         self.node_ids.push((hash, node_id));
         self.node_ids.sort_by_key(|n| n.0.0);
     }
 
-    fn get<I>(&self, str_buffer: &str, nodes: &[IdentNode<I>], segment: &str) -> Option<(Hash, NodeId)>{
+    fn get<I>(
+        &self,
+        str_buffer: &str,
+        nodes: &[IdentNode<I>],
+        segment: &str,
+    ) -> Option<(Hash, NodeId)> {
         let mut hasher = DefaultHasher::new();
         hasher.write(segment.as_bytes());
         let hash = hasher.finish();
-        match self.node_ids.binary_search_by_key(&hash, |hash_node_id| hash_node_id.0.0){
+        match self
+            .node_ids
+            .binary_search_by_key(&hash, |hash_node_id| hash_node_id.0.0)
+        {
             Ok(index) => {
-                for (_hash, node_id) in self.node_ids[..index].iter().rev(){
+                for (_hash, node_id) in self.node_ids[..index].iter().rev() {
                     let str_seg = nodes[node_id.0].segment.ident.substr(&str_buffer);
-                    if str_seg == segment{
+                    if str_seg == segment {
                         return Some((Hash(hash), *node_id));
-                    }
-                    else{
+                    } else {
                         break;
                     }
                 }
-                for (_hash, node_id) in self.node_ids[index..].iter(){
+                for (_hash, node_id) in self.node_ids[index..].iter() {
                     let str_seg = nodes[node_id.0].segment.ident.substr(&str_buffer);
-                    if str_seg == segment{
+                    if str_seg == segment {
                         return Some((Hash(hash), *node_id));
-                    }
-                    else{
+                    } else {
                         break;
                     }
                 }
@@ -685,13 +669,13 @@ impl SortedNodeIds{
 }
 
 #[derive(Debug, Clone)]
-struct Cursor<'a>{
+struct Cursor<'a> {
     chars: Chars<'a>,
     len_remaining: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum TokenKind{
+pub enum TokenKind {
     Ident,
     Integer,
     OpenSquareBrace,
@@ -708,62 +692,65 @@ enum TokenKind{
 const EOF_CHAR: char = '\0';
 
 #[derive(Debug, PartialEq, Eq)]
-struct Token{
+pub struct Token {
     kind: TokenKind,
     len: u32,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum TopicRouteParseError{
+pub enum TopicRouteParseError {
     UnexpectedToken(Token),
-    ExpectedDiffToken{expected: TokenKind, found: Token},
-    VarTypeDoesNotExist{invalid: Token},
+    ExpectedDiffToken { expected: TokenKind, found: Token },
+    VarTypeDoesNotExist { invalid: Token },
 }
 
 #[derive(Debug, Clone)]
-struct Parser<'a>{
+struct Parser<'a> {
     cursor: Cursor<'a>,
 }
 
-impl<'a> Parser<'a>{
-    fn new(route: &'a str) -> Parser<'a>{
-        Parser { 
-            cursor: Cursor::new(route), 
+impl<'a> Parser<'a> {
+    fn new(route: &'a str) -> Parser<'a> {
+        Parser {
+            cursor: Cursor::new(route),
         }
     }
 
-    fn bump(&mut self) -> Token{
+    fn bump(&mut self) -> Token {
         self.cursor.advance_token()
     }
 
-    fn first(&mut self) -> Token{
+    fn first(&mut self) -> Token {
         self.cursor.clone().advance_token()
     }
 
-    fn eat_while(&mut self, predicate: impl Fn(Token) -> bool){
+    fn eat_while(&mut self, predicate: impl Fn(Token) -> bool) {
         while predicate(self.first()) && !self.cursor.is_eof() {
             self.bump();
         }
     }
 
-    fn eat_whitespace(&mut self){
-        self.eat_while(|t| matches!(t.kind, TokenKind::Whitespace) );
+    fn eat_whitespace(&mut self) {
+        self.eat_while(|t| matches!(t.kind, TokenKind::Whitespace));
     }
 
-    fn get_token_range(&self, prev_token_len: usize, token: &Token) -> IdentRange{
-        let start= prev_token_len;
+    fn get_token_range(&self, prev_token_len: usize, token: &Token) -> IdentRange {
+        let start = prev_token_len;
         let end = token.len as usize;
         IdentRange::new(start, end)
     }
 
-    fn get_token_str(&self, route: &'a str, prev_token_len: usize, token: &Token) -> &'a str{
-        let start= prev_token_len;
+    fn get_token_str(&self, route: &'a str, prev_token_len: usize, token: &Token) -> &'a str {
+        let start = prev_token_len;
         let end = token.len as usize;
         let token_str = &route[start..end];
         token_str
     }
 
-    fn advance_route_template_parser(&mut self, route: &str) -> Result<Option<TemplateSegment>, TopicRouteParseError>{
+    fn advance_route_template_parser(
+        &mut self,
+        route: &str,
+    ) -> Result<Option<TemplateSegment>, TopicRouteParseError> {
         let cur_pos = self.cursor.pos_within_token() as usize;
         let token = self.bump();
         match token.kind {
@@ -778,13 +765,18 @@ impl<'a> Parser<'a>{
                 self.eat_whitespace();
                 self.advance_route_template_parser(route)
             }
-            TokenKind::CloseSquareBrace | TokenKind::CloseCurlyBrace |
-            TokenKind::Unknown | TokenKind::Pipe => Err(TopicRouteParseError::UnexpectedToken(token)),
+            TokenKind::CloseSquareBrace
+            | TokenKind::CloseCurlyBrace
+            | TokenKind::Unknown
+            | TokenKind::Pipe => Err(TopicRouteParseError::UnexpectedToken(token)),
             TokenKind::EOF => return Ok(None),
         }
     }
 
-    fn advance_topic_parser(&mut self, route: &str) -> Result<Option<ValueSegment>, TopicRouteParseError>{
+    fn advance_topic_parser(
+        &mut self,
+        route: &str,
+    ) -> Result<Option<ValueSegment>, TopicRouteParseError> {
         let cur_pos = self.cursor.pos_within_token() as usize;
         let token = self.bump();
         match token.kind {
@@ -798,195 +790,186 @@ impl<'a> Parser<'a>{
                 self.eat_whitespace();
                 self.advance_topic_parser(route)
             }
-            TokenKind::OpenSquareBrace | TokenKind::OpenCurlyBrace |
-            TokenKind::CloseSquareBrace | TokenKind::CloseCurlyBrace |
-            TokenKind::Unknown | TokenKind::Pipe => Err(TopicRouteParseError::UnexpectedToken(token)),
+            TokenKind::OpenSquareBrace
+            | TokenKind::OpenCurlyBrace
+            | TokenKind::CloseSquareBrace
+            | TokenKind::CloseCurlyBrace
+            | TokenKind::Unknown
+            | TokenKind::Pipe => Err(TopicRouteParseError::UnexpectedToken(token)),
             TokenKind::EOF => return Ok(None),
         }
     }
 
-    fn parse_template_ident(&mut self, prev_token_len: usize, token: &Token) -> Result<Option<TemplateSegment>, TopicRouteParseError>{
+    fn parse_template_ident(
+        &mut self,
+        prev_token_len: usize,
+        token: &Token,
+    ) -> Result<Option<TemplateSegment>, TopicRouteParseError> {
         self.eat_whitespace();
         let next_token = self.bump();
-        match next_token.kind{
-            TokenKind::Slash | TokenKind::EOF =>
-            Ok(Some(TemplateSegment::Segment{
-                ident: self.get_token_range(prev_token_len, token)
+        match next_token.kind {
+            TokenKind::Slash | TokenKind::EOF => Ok(Some(TemplateSegment::Segment {
+                ident: self.get_token_range(prev_token_len, token),
             })),
-            _ => Err(TopicRouteParseError::UnexpectedToken(next_token))
+            _ => Err(TopicRouteParseError::UnexpectedToken(next_token)),
         }
     }
 
-    fn parse_topic_ident(&mut self, prev_token_len: usize, token: &Token) -> Result<Option<ValueSegment>, TopicRouteParseError>{
+    fn parse_topic_ident(
+        &mut self,
+        prev_token_len: usize,
+        token: &Token,
+    ) -> Result<Option<ValueSegment>, TopicRouteParseError> {
         self.parse_topic_segment(prev_token_len, token, SegmentValType::Ident)
     }
 
-    fn parse_topic_integer(&mut self, prev_token_len: usize, token: &Token) -> Result<Option<ValueSegment>, TopicRouteParseError>{
+    fn parse_topic_integer(
+        &mut self,
+        prev_token_len: usize,
+        token: &Token,
+    ) -> Result<Option<ValueSegment>, TopicRouteParseError> {
         self.parse_topic_segment(prev_token_len, token, SegmentValType::Integer)
     }
 
-    fn parse_topic_segment(&mut self, prev_token_len: usize, token: &Token, value_type: SegmentValType) -> Result<Option<ValueSegment>, TopicRouteParseError>{
+    fn parse_topic_segment(
+        &mut self,
+        prev_token_len: usize,
+        token: &Token,
+        value_type: SegmentValType,
+    ) -> Result<Option<ValueSegment>, TopicRouteParseError> {
         self.eat_whitespace();
         let next_token = self.bump();
-        match next_token.kind{
-            TokenKind::Slash | TokenKind::EOF =>
-            Ok(Some(ValueSegment{
+        match next_token.kind {
+            TokenKind::Slash | TokenKind::EOF => Ok(Some(ValueSegment {
                 value_type: value_type,
-                str_range: self.get_token_range(prev_token_len, token)
+                str_range: self.get_token_range(prev_token_len, token),
             })),
-            _ => Err(TopicRouteParseError::UnexpectedToken(next_token))
+            _ => Err(TopicRouteParseError::UnexpectedToken(next_token)),
         }
     }
 
-    fn parse_enum(&mut self) -> Result<Option<TemplateSegment>, TopicRouteParseError>{
+    fn parse_enum(&mut self) -> Result<Option<TemplateSegment>, TopicRouteParseError> {
         let mut enum_values = Vec::new();
-        loop{
+        loop {
             self.eat_whitespace();
             let cur_pos = self.cursor.pos_within_token() as usize;
             let token = self.bump();
-            if let TokenKind::Ident = token.kind{
-                enum_values.push(
-                    self.get_token_range(cur_pos, &token)
-                );
+            if let TokenKind::Ident = token.kind {
+                enum_values.push(self.get_token_range(cur_pos, &token));
                 self.eat_whitespace();
                 let token = self.bump();
-                match token.kind{
+                match token.kind {
                     TokenKind::Pipe => continue,
-                    TokenKind::CloseSquareBrace => return Ok(Some(TemplateSegment::Enum{enum_values})),
-                    _ =>  return Err(TopicRouteParseError::UnexpectedToken(token)),
+                    TokenKind::CloseSquareBrace => {
+                        return Ok(Some(TemplateSegment::Enum { enum_values }));
+                    }
+                    _ => return Err(TopicRouteParseError::UnexpectedToken(token)),
                 }
-            }
-            else{
+            } else {
                 return Err(TopicRouteParseError::UnexpectedToken(token));
             }
         }
     }
 
-    fn parse_var(&mut self, route: &str) -> Result<Option<TemplateSegment>, TopicRouteParseError>{
+    fn parse_var(&mut self, route: &str) -> Result<Option<TemplateSegment>, TopicRouteParseError> {
         self.eat_whitespace();
         let cur_pos = self.cursor.pos_within_token() as usize;
         let token = self.bump();
-        if let TokenKind::Ident = token.kind{
-            let datatype = match self.get_token_str(route, cur_pos, &token){
+        if let TokenKind::Ident = token.kind {
+            let datatype = match self.get_token_str(route, cur_pos, &token) {
                 "str" => SegmentVarType::Str,
                 "integer" => SegmentVarType::Integer,
-                _ => return  Err(TopicRouteParseError::VarTypeDoesNotExist {
-                    invalid: token 
-                }),
+                _ => return Err(TopicRouteParseError::VarTypeDoesNotExist { invalid: token }),
             };
             self.eat_whitespace();
             let token = self.bump();
-            if let TokenKind::CloseCurlyBrace = token.kind{
+            if let TokenKind::CloseCurlyBrace = token.kind {
                 Ok(Some(TemplateSegment::Var { datatype }))
-            }
-            else{
+            } else {
                 Err(TopicRouteParseError::ExpectedDiffToken {
-                    expected: TokenKind::CloseCurlyBrace, found: token
+                    expected: TokenKind::CloseCurlyBrace,
+                    found: token,
                 })
             }
-        }
-        else{
+        } else {
             Err(TopicRouteParseError::ExpectedDiffToken {
-                expected: TokenKind::Ident, found: token
+                expected: TokenKind::Ident,
+                found: token,
             })
         }
     }
 }
 
-impl<'a> Cursor<'a>{
-    fn new(src: &'a str) -> Cursor<'a>{
-        Self { 
+impl<'a> Cursor<'a> {
+    fn new(src: &'a str) -> Cursor<'a> {
+        Self {
             len_remaining: src.len(),
             chars: src.chars(),
         }
     }
 
-    fn is_eof(&self) -> bool{
+    fn is_eof(&self) -> bool {
         self.chars.as_str().is_empty()
     }
 
-    fn as_str(&self) -> &'a str{
-        self.chars.as_str()
-    }
-
-    fn first(&self) -> char{
+    fn first(&self) -> char {
         self.chars.clone().next().unwrap_or(EOF_CHAR)
     }
 
-    fn second(&self) -> char{
-        let mut chars = self.chars.clone();
-        chars.next();
-        chars.next()
-            .unwrap_or(EOF_CHAR)
-    }
-
-    fn bump(&mut self) -> Option<char>{
+    fn bump(&mut self) -> Option<char> {
         self.chars.next()
     }
 
-    fn eat_while(&mut self, predicate: impl Fn(char) -> bool){
+    fn eat_while(&mut self, predicate: impl Fn(char) -> bool) {
         while predicate(self.first()) && !self.is_eof() {
             self.bump();
         }
     }
 
-    fn eat_until(&mut self, byte: u8){
-        let mut bytes = self.as_str().bytes().enumerate();
-        self.chars = loop {
-            match bytes.next() {
-                Some((i, cur_byte)) => if cur_byte == byte{
-                    break self.as_str()[i..].chars();
-                },
-                None => break "".chars(),
-            }
-        };
-    }
-
-    fn white_space(&mut self) -> TokenKind{
+    fn white_space(&mut self) -> TokenKind {
         self.eat_while(char::is_whitespace);
         TokenKind::Whitespace
     }
 
-    fn is_ident_start(c: char) -> bool{
+    fn is_ident_start(c: char) -> bool {
         matches!(c, 'a'..='z' | 'A'..='Z' | '_')
     }
 
-    fn is_ident_continue(c: char) -> bool{
+    fn is_ident_continue(c: char) -> bool {
         matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
     }
 
-    fn ident(&mut self) -> TokenKind{
+    fn ident(&mut self) -> TokenKind {
         self.eat_while(Self::is_ident_continue);
         TokenKind::Ident
     }
 
-    fn number(&mut self) -> TokenKind{
+    fn number(&mut self) -> TokenKind {
         self.eat_while(Self::is_number_continue);
         TokenKind::Integer
     }
 
-    fn is_number_start(c: char) -> bool{
+    fn is_number_start(c: char) -> bool {
         matches!(c, '0'..='9')
     }
 
-    fn is_number_continue(c: char) -> bool{
+    fn is_number_continue(c: char) -> bool {
         matches!(c, '0'..='9' | '_')
     }
 
-    fn pos_within_token(&self) -> u32{
+    fn pos_within_token(&self) -> u32 {
         (self.len_remaining - self.chars.as_str().len()) as u32
     }
 
-    fn len_left(&self) -> u32{
-        self.chars.as_str().len() as u32
-    }
-
-    fn advance_token(&mut self) -> Token{
+    fn advance_token(&mut self) -> Token {
         let Some(first_char) = self.chars.next() else {
-            return Token{kind: TokenKind::EOF, len: 0};
+            return Token {
+                kind: TokenKind::EOF,
+                len: 0,
+            };
         };
 
-        let kind: TokenKind = match first_char{
+        let kind: TokenKind = match first_char {
             '/' => TokenKind::Slash,
             '[' => TokenKind::OpenSquareBrace,
             ']' => TokenKind::CloseSquareBrace,
@@ -998,76 +981,98 @@ impl<'a> Cursor<'a>{
             c if Self::is_number_start(c) => self.number(),
             _ => TokenKind::Unknown,
         };
-        Token { kind, len: self.pos_within_token() }
+        Token {
+            kind,
+            len: self.pos_within_token(),
+        }
     }
 }
 
 #[cfg(test)]
-mod test{
-use crate::topic_router::{BoxFuture, IdentRange, SegmentVarType, TemplateSegment, TopicRouter, TopicValue, macros::into_async};
+mod test {
+    use crate::topic_router::{
+        BoxFuture, IdentRange, SegmentVarType, TemplateSegment, TopicRouter, TopicValue,
+        macros::into_async,
+    };
 
-    fn assert_substr(
-        route: &str, substr: &str, start: usize, end: usize
-    ) -> IdentRange{
+    fn assert_substr(route: &str, substr: &str, start: usize, end: usize) -> IdentRange {
         let ident = IdentRange::new(start, end);
         assert_eq!(substr, ident.substr(route));
         ident
     }
 
     #[test]
-    fn url_router_test(){
-        let topic1 =  "{integer}/routepart1/{str}/routepart2/[enumval1|enumval2|enumval3]/routepart3";
+    fn url_router_test() {
+        let topic1 =
+            "{integer}/routepart1/{str}/routepart2/[enumval1|enumval2|enumval3]/routepart3";
         let segments = TopicRouter::<()>::parse_route(topic1);
         dbg!(&segments);
-        assert_eq!(Ok(vec![
-            TemplateSegment::Var { datatype: SegmentVarType::Integer },
-            TemplateSegment::Segment { ident:
-                assert_substr(topic1, "routepart1", 10, 20) },
-            TemplateSegment::Var { datatype: SegmentVarType::Str },
-            TemplateSegment::Segment { ident:
-                assert_substr(topic1, "routepart2", 27, 37) },
-            TemplateSegment::Enum {enum_values: vec![
-                assert_substr(topic1, "enumval1", 39, 47),
-                assert_substr(topic1, "enumval2", 48, 56), 
-                assert_substr(topic1, "enumval3", 57, 65)
-            ]},
-            TemplateSegment::Segment { ident: 
-                assert_substr(topic1, "routepart3", 67, 77)},
-        ]), segments);
-        let topic2 =  "routepart1/routepart2/[enumval1|enumval2]";
+        assert_eq!(
+            Ok(vec![
+                TemplateSegment::Var {
+                    datatype: SegmentVarType::Integer
+                },
+                TemplateSegment::Segment {
+                    ident: assert_substr(topic1, "routepart1", 10, 20)
+                },
+                TemplateSegment::Var {
+                    datatype: SegmentVarType::Str
+                },
+                TemplateSegment::Segment {
+                    ident: assert_substr(topic1, "routepart2", 27, 37)
+                },
+                TemplateSegment::Enum {
+                    enum_values: vec![
+                        assert_substr(topic1, "enumval1", 39, 47),
+                        assert_substr(topic1, "enumval2", 48, 56),
+                        assert_substr(topic1, "enumval3", 57, 65)
+                    ]
+                },
+                TemplateSegment::Segment {
+                    ident: assert_substr(topic1, "routepart3", 67, 77)
+                },
+            ]),
+            segments
+        );
+        let topic2 = "routepart1/routepart2/[enumval1|enumval2]";
         let segments = TopicRouter::<fn() -> ()>::parse_route(topic2);
-        assert_eq!(Ok(vec![
-            TemplateSegment::Segment { ident:
-                assert_substr(topic2, "routepart1", 0, 10)
-            },
-            TemplateSegment::Segment { ident:
-                assert_substr(topic2, "routepart2", 11, 21)
-            },
-            TemplateSegment::Enum {enum_values: vec![
-                assert_substr(topic2, "enumval1", 23, 31),
-                assert_substr(topic2, "enumval2", 32, 40)
-            ]},
-        ]), segments);
+        assert_eq!(
+            Ok(vec![
+                TemplateSegment::Segment {
+                    ident: assert_substr(topic2, "routepart1", 0, 10)
+                },
+                TemplateSegment::Segment {
+                    ident: assert_substr(topic2, "routepart2", 11, 21)
+                },
+                TemplateSegment::Enum {
+                    enum_values: vec![
+                        assert_substr(topic2, "enumval1", 23, 31),
+                        assert_substr(topic2, "enumval2", 32, 40)
+                    ]
+                },
+            ]),
+            segments
+        );
         dbg!(segments);
 
-        let topic3 =  "routepart1/routepart2/routepart3/routpart4";
+        let topic3 = "routepart1/routepart2/routepart3/routpart4";
 
-        async fn print_topic1(_topic_values: &[TopicValue<'_>]) -> anyhow::Result<()>{
+        async fn print_topic1(_topic_values: &[TopicValue<'_>]) -> anyhow::Result<()> {
             println!("test topic 1");
             Ok(())
         }
-        async fn print_topic2(_topic_values: &[TopicValue<'_>]) -> anyhow::Result<()>{
+        async fn print_topic2(_topic_values: &[TopicValue<'_>]) -> anyhow::Result<()> {
             println!("test topic 2");
             Ok(())
         }
-        async fn print_topic3(_topic_values: &[TopicValue<'_>]) -> anyhow::Result<()>{
+        async fn print_topic3(_topic_values: &[TopicValue<'_>]) -> anyhow::Result<()> {
             println!("test topic 3");
             Ok(())
         }
 
         let mut router: TopicRouter<
-            for<'o, 'v> fn(&'v[TopicValue<'o>]) -> BoxFuture<'v, anyhow::Result<()>>>
-                = TopicRouter::new();
+            for<'o, 'v> fn(&'v [TopicValue<'o>]) -> BoxFuture<'v, anyhow::Result<()>>,
+        > = TopicRouter::new();
 
         dbg!(router.add_route(topic2, into_async!(print_topic1)));
         router.debug_print();
@@ -1076,17 +1081,17 @@ use crate::topic_router::{BoxFuture, IdentRange, SegmentVarType, TemplateSegment
         router.debug_print();
         //dbg!(router.add_route(topic3, into_async!(print_topic3)));
         router.debug_print();
-        let topic1_1 =  "42/routepart1/str_var1/routepart2/enumval1/routepart3";
-        let topic1_2 =  "9102988/routepart1/str23j_var2/routepart2/enumval2/routepart3";
-        let topic1_3 =  "3242/routepart1/str_334dfvar3/routepart2/enumval3/routepart3";
+        let topic1_1 = "42/routepart1/str_var1/routepart2/enumval1/routepart3";
+        let topic1_2 = "9102988/routepart1/str23j_var2/routepart2/enumval2/routepart3";
+        let topic1_3 = "3242/routepart1/str_334dfvar3/routepart2/enumval3/routepart3";
 
         router.debug_print();
-        router.exec_handler_for_route(&&(),topic1_1);
-        router.exec_handler_for_route(&&(),topic1_2);
+        router.exec_handler_for_route(&&(), topic1_1);
+        router.exec_handler_for_route(&&(), topic1_2);
         router.exec_handler_for_route(&&(), topic1_3);
 
-        let topic2_1 =  "routepart1/routepart2/enumval1";
-        let topic2_2 =  "routepart1/routepart2/enumval2";
+        let topic2_1 = "routepart1/routepart2/enumval1";
+        let topic2_2 = "routepart1/routepart2/enumval2";
 
         router.exec_handler_for_route(&&(), topic2_1);
         router.exec_handler_for_route(&&(), topic2_2);
@@ -1096,5 +1101,3 @@ use crate::topic_router::{BoxFuture, IdentRange, SegmentVarType, TemplateSegment
         assert!(false);
     }
 }
-
-

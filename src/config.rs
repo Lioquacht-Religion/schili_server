@@ -43,9 +43,9 @@ pub enum LogLevelFilter {
     Trace,
 }
 
-impl LogLevelFilter{
-    pub fn to_log_level_filter(self) -> log::LevelFilter{
-        match self{
+impl LogLevelFilter {
+    pub fn to_log_level_filter(self) -> log::LevelFilter {
+        match self {
             LogLevelFilter::Off => log::LevelFilter::Off,
             LogLevelFilter::Error => log::LevelFilter::Error,
             LogLevelFilter::Warn => log::LevelFilter::Warn,
@@ -59,7 +59,7 @@ impl LogLevelFilter{
 #[derive(Deserialize)]
 pub struct LoggingConfig {
     pub log_level: Option<LogLevelFilter>,
-    pub file: Option<PathBuf>
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]

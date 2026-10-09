@@ -4,30 +4,27 @@ use sensor_data_server::{
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-
     let config = config::get_config().await;
 
     let mut dispatch_logger = fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
-                    "[{} {} {}] {}",
-                    chrono::Local::now(),
-                    record.level(),
-                    record.target(),
-                    message
+                "[{} {} {}] {}",
+                chrono::Local::now(),
+                record.level(),
+                record.target(),
+                message
             ));
         })
         .chain(std::io::stdout());
-    if let Some(log_level_filter) = &config.logging.log_level{
+    if let Some(log_level_filter) = &config.logging.log_level {
         dispatch_logger = dispatch_logger.level(log_level_filter.to_log_level_filter());
     }
-    if let Some(log_file) = &config.logging.file{
-        dispatch_logger = dispatch_logger
-            .chain(fern::log_file(log_file)?)
+    if let Some(log_file) = &config.logging.file {
+        dispatch_logger = dispatch_logger.chain(fern::log_file(log_file)?)
     }
-    if let Err(e) = dispatch_logger
-        .apply(){
-            panic!("Logger configuration error: {e}")
+    if let Err(e) = dispatch_logger.apply() {
+        panic!("Logger configuration error: {e}")
     }
 
     email::send_server_started_email(&config.email);
