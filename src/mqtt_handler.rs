@@ -233,14 +233,23 @@ async fn subscribe_to_topics(
 
     let topics = [
         &TOPICS.measurement_bundle,
+        &TOPICS.measurement_bundle_msgpack,
         &TOPICS.chip_temp,
+        &TOPICS.chip_temp_msgpack,
         &TOPICS.temp,
+        &TOPICS.temp_msgpack,
         &TOPICS.humidity,
+        &TOPICS.humidity_msgpack,
         &TOPICS.air_pressure,
+        &TOPICS.air_pressure_msgpack,
         &TOPICS.light_intensity,
+        &TOPICS.light_intensity_msgpack,
         &TOPICS.battery_voltage,
+        &TOPICS.battery_voltage_msgpack,
         &TOPICS.co2,
+        &TOPICS.co2_msgpack,
         &TOPICS.error,
+        &TOPICS.error_msgpack,
     ];
     for topic in topics {
         if let Err(e) = client.subscribe(topic, QoS::AtLeastOnce).await {
