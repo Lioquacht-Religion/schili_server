@@ -1195,23 +1195,23 @@ use crate::topic_router::{
 
         smol::block_on(async {
             let counter = AtomicIsize::new(0);
-            assert_eq!(Ok(()), dbg!(
-                    router.exec_handler_for_route(&&counter, topic1_1).await
+            assert!(dbg!(
+                    router.exec_handler_for_route(&&counter, topic1_1).await.is_ok()
             ));
             assert_eq!(1, counter.load(atomic::Ordering::Relaxed));
-            assert_eq!(Ok(()), router.exec_handler_for_route(&&counter, topic1_2).await);
+            assert!(router.exec_handler_for_route(&&counter, topic1_2).await.is_ok());
             assert_eq!(2, counter.load(atomic::Ordering::Relaxed));
-            assert_eq!(Ok(()), router.exec_handler_for_route(&&counter, topic1_3).await);
+            assert!(router.exec_handler_for_route(&&counter, topic1_3).await.is_ok());
             assert_eq!(3, counter.load(atomic::Ordering::Relaxed));
 
             let topic2_1 = "routepart1/routepart2/enumval1";
             let topic2_2 = "routepart1/routepart2/enumval2";
 
-            assert_eq!(Ok(()), router.exec_handler_for_route(&&counter, topic2_1).await);
+            assert!(router.exec_handler_for_route(&&counter, topic2_1).await.is_ok());
             assert_eq!(5, counter.load(atomic::Ordering::Relaxed));
-            assert_eq!(Ok(()), router.exec_handler_for_route(&&counter, topic2_2).await);
+            assert!(router.exec_handler_for_route(&&counter, topic2_2).await.is_ok());
             assert_eq!(7, counter.load(atomic::Ordering::Relaxed));
-            assert_eq!(Ok(()), router.exec_handler_for_route(&&counter, topic3).await);
+            assert!(router.exec_handler_for_route(&&counter, topic3).await.is_ok());
             assert_eq!(10, counter.load(atomic::Ordering::Relaxed));
         });
         assert!(false);
