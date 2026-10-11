@@ -304,6 +304,7 @@ async fn handle_publish<'tp, 'pu, 'po>(
 ) -> anyhow::Result<()> {
     info!("Publish received for topic: {}", &publish.topic);
     router.exec_handler_for_route(&(publish, pool), &publish.topic)
+        .await
         .map_err(|e| anyhow!("Received error from handler execution. Error: {e:?}"))
 }
 
