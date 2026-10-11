@@ -261,16 +261,6 @@ async fn subscribe_to_topics(
 
 struct DisconnectOccured;
 
-async fn handle_publish2<'pu1: 'pu2, 'pu2, 'po>(
-    router: &TopicRouter<Func>,
-    publish: &'pu1 Publish,
-    db_pool: &'po Pool<Postgres>,
-) {
-    if let Err(es) = handle_publish(router, db_pool, &publish).await {
-            error!("An error occured while trying to process published messages: error: {es}");
-    };
-}
-
 async fn handle_mq_events(
     router: &TopicRouter<Func>,
     eventloop: &mut EventLoop,
@@ -295,6 +285,16 @@ async fn handle_mq_events(
             }
         }
     }
+}
+
+async fn handle_publish2<'pu1: 'pu2, 'pu2, 'po>(
+    router: &TopicRouter<Func>,
+    publish: &'pu1 Publish,
+    db_pool: &'po Pool<Postgres>,
+) {
+    if let Err(es) = handle_publish(router, db_pool, &publish).await {
+            error!("An error occured while trying to process published messages for topic='{}': error: {es}", publish.topic);
+    };
 }
 
 async fn handle_publish<'tp, 'pu, 'po>(

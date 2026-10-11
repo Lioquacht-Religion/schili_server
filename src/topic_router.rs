@@ -47,6 +47,12 @@ pub trait StoredFnTrait: Clone {
     ) ->  BoxFuture<'v, Self::Result<'v>>;
 }
 
+pub trait StoredFnTraitResult : for<'ret> StoredFnTrait<Result<'ret> = anyhow::Result<()>>{
+}
+
+impl<T: for<'ret> StoredFnTrait<Result<'ret> = anyhow::Result<()>>> StoredFnTraitResult for T {
+}
+
 impl StoredFnTrait for for<'o, 'v> fn(&'v [TopicValue<'o>]) -> BoxFuture<'v, anyhow::Result<()>> {
     type Input<'new> = ();
     type Result<'ret> = anyhow::Result<()>;
@@ -423,13 +429,13 @@ impl<F: Clone> TopicRouter<F> {
     }
 }
 
-impl<F: StoredFnTrait> TopicRouter<F> {
+impl<F: StoredFnTraitResult> TopicRouter<F> {
 
     pub async fn exec_handler_for_route<'r>(
         &self,
         input: &F::Input<'r>,
         route: &'r str,
-    ) -> Result<(), TopicRouteExecError<F::Result<'r>>> {
+    ) -> Result<(), TopicRouteExecError<anyhow::Error>> {
         let mut parser = Parser::new(route);
         self.exec_handler_for_route_inner(input, route, &mut parser, ROOT_NODE_ID).await
     }
@@ -440,7 +446,7 @@ impl<F: StoredFnTrait> TopicRouter<F> {
         route: &'r str,
         parser: &'p mut Parser<'r>,
         mut cur_parent_node_id: NodeIdType,
-    ) -> Result<(), TopicRouteExecError<F::Result<'r>>> {
+    ) -> Result<(), TopicRouteExecError<anyhow::Error>> {
         let mut topic_values = Vec::new();
         loop {
             let segment = parser.advance_topic_parser(route)
@@ -480,7 +486,7 @@ impl<F: StoredFnTrait> TopicRouter<F> {
         value_type: SegmentValType,
         segment_str: &'r str,
         topic_values: &'t mut Vec<TopicValue<'r>>,
-    ) -> Result<Option<NodeIdType>, TopicRouteExecError<F::Result<'r>>> {
+    ) -> Result<Option<NodeIdType>, TopicRouteExecError<anyhow::Error>> {
         let children = parent_node_id.get_children(self);
         let ident_res = if let Some((_hash, node_id)) =
             children
@@ -493,9 +499,8 @@ impl<F: StoredFnTrait> TopicRouter<F> {
                 StrSegmentKind::Enum => topic_values.push(TopicValue::EnumVar(segment_str)),
             }
             if let Some(handler) = &child_node.handler {
-                //TODO: propegate error, change trait exec function return type
-                let e = handler.exec(topic_values, *input).await;
-                    //.map_err(|e| Err(TopicRouteExecError::HandlerError(e)))?;
+                handler.exec(topic_values, *input).await
+                    .map_err(|e| TopicRouteExecError::HandlerError(e))?;
             }
             Some(NodeIdType::Ident(node_id))
         } else {
@@ -519,7 +524,8 @@ impl<F: StoredFnTrait> TopicRouter<F> {
                     topic_values.push(TopicValue::IntVar(segment_str.parse().unwrap_or(0)));
                 }
                 if let Some(handler) = &child_node.handler {
-                    let e = handler.exec(topic_values, *input).await;
+                    handler.exec(topic_values, *input).await
+                    .map_err(|e| TopicRouteExecError::HandlerError(e))?;
                 }
                 Some(NodeIdType::Variable(var_node_id))
             } else {
