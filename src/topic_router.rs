@@ -1185,6 +1185,14 @@ use crate::topic_router::{
             Ok(())
         }
 
+        let topic4_error = "error";
+
+        async fn print_topic4_error(_topic_values: &[TopicValue<'_>], counter: &AtomicIsize) -> anyhow::Result<()> {
+            counter.fetch_add(4, atomic::Ordering::Relaxed);
+            println!("test topic 3");
+            Err(anyhow!("test handler error"))
+        }
+
         let mut router: TopicRouter<
             for<'o, 'v> fn(&'v [TopicValue<'o>], &'o AtomicIsize) -> BoxFuture<'v, anyhow::Result<()>>,
         > = TopicRouter::new();
@@ -1195,9 +1203,14 @@ use crate::topic_router::{
         router.debug_print();
         assert_eq!(Ok(()), router.add_route(topic3, into_async1!(print_topic3)));
         router.debug_print();
+        assert_eq!(Ok(()), router.add_route(topic4_error, into_async1!(print_topic4_error)));
+        router.debug_print();
         let topic1_1 = "42/routepart1/str_var1/routepart2/enumval1/routepart3";
         let topic1_2 = "9102988/routepart1/str23j_var2/routepart2/enumval2/routepart3";
         let topic1_3 = "3242/routepart1/str_334dfvar3/routepart2/enumval3/routepart3";
+
+
+        let topic_error = "@3242/error/this/does/not/exist";
 
         smol::block_on(async {
             let counter = AtomicIsize::new(0);
@@ -1219,6 +1232,16 @@ use crate::topic_router::{
             assert_eq!(7, counter.load(atomic::Ordering::Relaxed));
             assert!(router.exec_handler_for_route(&&counter, topic3).await.is_ok());
             assert_eq!(10, counter.load(atomic::Ordering::Relaxed));
+            assert!(
+                dbg!(
+                    router.exec_handler_for_route(&&counter, topic_error).await
+                ).is_err()
+            );
+            assert!(
+                dbg!(
+                    router.exec_handler_for_route(&&counter, topic4_error).await
+                ).is_err()
+            );
         });
         assert!(false);
 

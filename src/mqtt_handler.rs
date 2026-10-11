@@ -211,7 +211,6 @@ type Func = for<'o, 'v> fn(
 async fn subscribe_to_topics(
     client: &AsyncClient,
 ) -> Result<TopicRouter<Func>, TopicRouteParseError> {
-    //let mut errors: Vec<anyhow::Error> = Vec::new();
     let mut router: TopicRouter<Func> = TopicRouter::new();
 
     router.add_route(
@@ -250,11 +249,11 @@ async fn subscribe_to_topics(
         &TOPICS.co2_msgpack,
         &TOPICS.error,
         &TOPICS.error_msgpack,
-    ];
-    for topic in topics {
-        if let Err(e) = client.subscribe(topic, QoS::AtLeastOnce).await {
-            error!("Error while subscribing: {e}");
-        }
+    ]
+        .into_iter()
+        .map(|t| rumqttc::SubscribeFilter { path: t.to_owned(), qos: QoS::AtLeastOnce });
+    if let Err(e) = client.subscribe_many(topics).await {
+        error!("Error while subscribing: {e}");
     }
     Ok(router)
 }
