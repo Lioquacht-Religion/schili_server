@@ -7,8 +7,7 @@ use anyhow::anyhow;
 use log::{error, info};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS, StateError};
 use schili_api::{
-    api::SensorType,
-    mq_topics::{
+    api::SensorType, mq_topics::{
         Dataformat, TOPICS
     },
 };
@@ -16,12 +15,10 @@ use sqlx::{Pool, Postgres};
 use tokio::io;
 
 use crate::{
-    config::Config,
-    database, service,
-    topic_router::{BoxFuture, TopicRouteParseError, TopicRouter, TopicValue, macros::into_async2},
+    SensorCache, config::Config, database, service, topic_router::{BoxFuture, TopicRouteParseError, TopicRouter, TopicValue, macros::into_async3},
 };
 
-pub async fn start_mq_client(app_config: &Config) {
+pub async fn start_mq_client(app_config: &Config, sensor_cache: SensorCache) {
     let mut mqttoptions = MqttOptions::new(
         &app_config.mqtt.broker_id,
         &app_config.mqtt.host,
@@ -38,7 +35,7 @@ pub async fn start_mq_client(app_config: &Config) {
         loop {
             let _ = match subscribe_to_topics(&client).await {
                 Ok(router) => {
-                    handle_mq_events(&router, &mut eventloop, &pool).await;
+                    handle_mq_events(&router, &mut eventloop, &pool, sensor_cache.clone()).await;
                 }
                 Err(e) => {
                     error!("Received while parsing topic routes. Error: {:?}", e);
@@ -52,6 +49,7 @@ async fn handle_simple_measurements<'o, 'v>(
     topic_values: &'v [TopicValue<'o>],
     publish: &'o Publish,
     pool: &'o Pool<Postgres>,
+    sensor_cache: &'o SensorCache,
 ) -> anyhow::Result<()> {
     if let [
         TopicValue::IntVar(_uuid),
@@ -75,7 +73,9 @@ async fn handle_simple_measurements<'o, 'v>(
                 };
                 match sensor_type {
                     SensorType::Temperature => {
-                        service::insert_temperature_w_sensor(pool, &measurement).await
+                        service::insert_temperature_w_sensor(
+                            pool, &measurement, sensor_cache.clone()
+                        ).await
                     }
                     SensorType::Humidity => service::insert_humidity(pool, &measurement).await,
                     SensorType::Airpressure => {
@@ -110,6 +110,7 @@ async fn handle_co2_measurement<'o, 'v>(
     topic_values: &'v [TopicValue<'o>],
     publish: &'o Publish,
     pool: &'o Pool<Postgres>,
+    sensor_cache: &'o SensorCache,
 ) -> anyhow::Result<()> {
     if let [
         TopicValue::IntVar(_uuid),
@@ -150,6 +151,7 @@ async fn handle_measurements_bundle<'o, 'v>(
     topic_values: &'v [TopicValue<'o>],
     publish: &'o Publish,
     pool: &'o Pool<Postgres>,
+    sensor_cache: &'o SensorCache,
 ) -> anyhow::Result<()> {
     if let [TopicValue::IntVar(_uuid), TopicValue::EnumVar(dataformat)] = topic_values {
         let mut measurements = match Dataformat::from_str(*dataformat) {
@@ -178,6 +180,7 @@ async fn handle_errors<'o, 'v>(
     topic_values: &'v [TopicValue<'o>],
     publish: &'o Publish,
     pool: &'o Pool<Postgres>,
+    sensor_cache: &'o SensorCache,
 ) -> anyhow::Result<()> {
     if let [TopicValue::IntVar(_uuid), TopicValue::EnumVar(dataformat)] = topic_values {
         let sensor_error = match Dataformat::from_str(*dataformat) {
@@ -205,7 +208,8 @@ async fn handle_errors<'o, 'v>(
 type Func = for<'o, 'v> fn(
     &'v [TopicValue<'o>],
     &'o Publish,
-    input2: &'o Pool<Postgres>,
+    &'o Pool<Postgres>,
+    &'o SensorCache,
 ) -> BoxFuture<'v, anyhow::Result<()>>;
 
 async fn subscribe_to_topics(
@@ -215,19 +219,19 @@ async fn subscribe_to_topics(
 
     router.add_route(
         "{integer}/[json|msgpack]/[temperature|humidity|airpressure|lightintensity]/[sensor|chip]",
-        into_async2!(handle_simple_measurements),
+        into_async3!(handle_simple_measurements),
     )?;
     router.add_route(
         "{integer}/[json|msgpack]/co2/sensor",
-        into_async2!(handle_co2_measurement),
+        into_async3!(handle_co2_measurement),
     )?;
     router.add_route(
         "{integer}/[json|msgpack]/measurement/bundle/sensor",
-        into_async2!(handle_measurements_bundle),
+        into_async3!(handle_measurements_bundle),
     )?;
     router.add_route(
         "{integer}/[json|msgpack]/error/sensor",
-        into_async2!(handle_errors),
+        into_async3!(handle_errors),
     )?;
 
     let topics = [
@@ -264,45 +268,42 @@ async fn handle_mq_events(
     router: &TopicRouter<Func>,
     eventloop: &mut EventLoop,
     db_pool: &Pool<Postgres>,
+    sensor_cache: SensorCache,
 ) -> DisconnectOccured {
     loop {
         let event = eventloop.poll().await;
         match event {
             Ok(Event::Incoming(Packet::Publish(publish))) => {
-                handle_publish2(router, &publish, db_pool).await;
+                if let Err(es) = handle_publish(router, db_pool, &publish, sensor_cache.clone()).await {
+                        error!("An error occured while trying to process published messages for topic='{}': error: {es}", publish.topic);
+                };
             }
             Ok(_event) => {
                 continue;
             }
             Err(e) => {
-                error!("Error received = {:?}", e);
                 if let rumqttc::ConnectionError::MqttState(StateError::Io(e)) = e {
                     if let io::ErrorKind::ConnectionAborted = e.kind() {
+                        error!("Error received connection aborted = {:?}", e);
                         return DisconnectOccured;
                     }
+                }
+                else{
+                    error!("Error received = {:?}", e);
                 }
             }
         }
     }
 }
 
-async fn handle_publish2<'pu1: 'pu2, 'pu2, 'po>(
-    router: &TopicRouter<Func>,
-    publish: &'pu1 Publish,
-    db_pool: &'po Pool<Postgres>,
-) {
-    if let Err(es) = handle_publish(router, db_pool, &publish).await {
-            error!("An error occured while trying to process published messages for topic='{}': error: {es}", publish.topic);
-    };
-}
-
 async fn handle_publish<'tp, 'pu, 'po>(
     router: &'tp TopicRouter<Func>,
     pool: &'po Pool<Postgres>,
     publish: &'pu Publish,
+    sensor_cache: SensorCache,
 ) -> anyhow::Result<()> {
     info!("Publish received for topic: {}", &publish.topic);
-    router.exec_handler_for_route(&(publish, pool), &publish.topic)
+    router.exec_handler_for_route(&(publish, pool, &sensor_cache), &publish.topic)
         .await
         .map_err(|e| anyhow!("Received error from handler execution. Error: {e:?}"))
 }

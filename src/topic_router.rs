@@ -23,6 +23,7 @@ pub mod macros {
     #[allow(unused_imports)]
     pub(crate) use into_async1;
 
+    #[allow(unused_macros)]
     macro_rules! into_async2 {
         ($func:expr) => {
             |topic_values, input1, input2| {
@@ -30,7 +31,19 @@ pub mod macros {
             }
         };
     }
+    #[allow(unused_imports)]
     pub(crate) use into_async2;
+
+    #[allow(unused_macros)]
+    macro_rules! into_async3 {
+        ($func:expr) => {
+            |topic_values, input1, input2, input3| {
+                Box::pin(async { $func(topic_values, input1, input2, input3).await })
+            }
+        };
+    }
+    #[allow(unused_imports)]
+    pub(crate) use into_async3;
 }
 
 const ROOT_NODE_ID: NodeIdType = NodeIdType::Ident(NodeId::new(0));
@@ -90,6 +103,20 @@ impl<T1: 'static, T2: 'static> StoredFnTrait
         input: Self::Input<'new>,
     ) ->  BoxFuture<'v, Self::Result<'v>>{
         self(topice_values, input.0, input.1)
+    }
+}
+
+impl<T1: 'static, T2: 'static, T3: 'static> StoredFnTrait
+    for for<'o, 'v> fn(&'v [TopicValue<'o>], &'o T1, &'o T2, &'o T3) -> BoxFuture<'v, anyhow::Result<()>>
+{
+    type Input<'new> = (&'new T1, &'new T2, &'new T3);
+    type Result<'ret> = anyhow::Result<()>;
+    fn exec<'new, 'v>(
+        &self,
+        topice_values: &'v [TopicValue<'new>],
+        input: Self::Input<'new>,
+    ) ->  BoxFuture<'v, Self::Result<'v>>{
+        self(topice_values, input.0, input.1, input.2)
     }
 }
 

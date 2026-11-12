@@ -1,21 +1,19 @@
 // service.rs
 
+use std::{collections::HashMap, sync::Arc};
+
 use anyhow::anyhow;
 use bigdecimal::{BigDecimal, FromPrimitive, Signed};
 use chrono::{Local, TimeDelta};
 use log::{error, info};
 use schili_api::api::{
-    self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SensorType,
-    SimpleMeasurement,
+    self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SensorType, SensorWithWarnLimitsAndDBId, SimpleMeasurement,
 };
 use sqlx::{Pool, Postgres};
 
 use crate::{
-    api_db_conv::ModelInto,
-    config, email,
-    repository::{
-        self, AirPressure, AvgMeasureTimeInterval, BatteryVoltage, ChipTemperature,
-        DBSimpleMeasurement, Humidity, LightIntensity, Temperature,
+    SensorCache, api_db_conv::ModelInto, config, email, repository::{
+        self, AirPressure, AvgMeasureTimeInterval, BatteryVoltage, ChipTemperature, DBSimpleMeasurement, Humidity, LightIntensity, Temperature,
     },
 };
 
@@ -23,10 +21,10 @@ use crate::{
 
 pub async fn add_sensor(
     pool: &Pool<Postgres>,
-    api_sensor: &api::Sensor,
+    api_sensor: &api::SensorWithWarnLimits,
 ) -> anyhow::Result<repository::Sensor> {
-    let mut db_sensor: repository::Sensor = (&*api_sensor).model_into();
-    repository::insert_sensor_with_sensor_types(&pool, &mut db_sensor)
+    let (mut db_sensor, warn_limits) = (&*api_sensor).model_into();
+    repository::insert_sensor_with_sensor_types(&pool, &mut db_sensor, &warn_limits)
         .await
         .map_err(|_| {
             anyhow!(
@@ -37,17 +35,17 @@ pub async fn add_sensor(
     Ok(db_sensor)
 }
 
-pub async fn get_sensor(pool: &Pool<Postgres>, sensor_ref: &str) -> anyhow::Result<api::Sensor> {
+pub async fn get_sensor(pool: &Pool<Postgres>, sensor_ref: &str) -> anyhow::Result<api::SensorWithTypes> {
     let db_sensor = repository::find_sensor_and_types_by_ref(&pool, sensor_ref)
         .await
         .map_err(|e| {
             anyhow!("Sensor with reference='{sensor_ref}' could not be found. Error: {e}",)
         })?;
-    let api_sensor: api::Sensor = (&db_sensor).model_into();
+    let api_sensor = (&db_sensor).model_into();
     Ok(api_sensor)
 }
 
-pub async fn get_all_sensors(pool: &Pool<Postgres>) -> anyhow::Result<Vec<api::Sensor>> {
+pub async fn get_all_sensors(pool: &Pool<Postgres>) -> anyhow::Result<Vec<api::SensorWithTypes>> {
     let db_sensors = repository::find_all_sensors(&pool)
         .await
         .map_err(|e| anyhow!("Sensors could not be fetched. Error: {e}",))?;
@@ -59,9 +57,9 @@ pub async fn get_all_sensors_filtered(
     pool: &Pool<Postgres>,
     sensor_name_part: &str,
     sensor_types: &[api::SensorType],
-) -> anyhow::Result<Vec<api::Sensor>> {
-    let sensor_types: Vec<repository::SensorType> =
-        sensor_types.iter().map(|st| st.model_into()).collect();
+) -> anyhow::Result<Vec<api::SensorWithTypes>> {
+    let sensor_types: Vec<repository::SensorTypeDB> =
+        sensor_types.iter().map(|st| (*st).into()).collect();
     let db_sensors =
         repository::find_all_sensors_with_filter(&pool, sensor_name_part, &sensor_types)
             .await
@@ -97,13 +95,12 @@ const TEMP_CHANGE_WARNING: i32 = 10;
 pub async fn insert_temperature_w_sensor<'a, 'b>(
     pool: &'a Pool<Postgres>,
     api_temp_measure: &api::SensorSingleSimpleMeasure,
+    sensor_cache: SensorCache,
 ) -> anyhow::Result<()> {
-    let sensor_ref = &api_temp_measure.sensor_reference;
+    let sensor_ref: &str = api_temp_measure.sensor_reference.as_str();
 
-    // TODO: check if results of these two queries can be cached
-    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
-        .await
-        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
+    let sensor
+        = sensor_cache.get_sensor_by_ref(pool, sensor_ref).await?;
     insert_measurement(
         pool,
         sensor.sensor_id,

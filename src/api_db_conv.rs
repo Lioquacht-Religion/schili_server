@@ -2,9 +2,9 @@
 
 use std::collections::HashSet;
 
-use schili_api::api::{self, SensorSimpleMeasurements};
+use schili_api::api::{self, SensorSimpleMeasurements, SensorTrait};
 
-use crate::repository::{self, DBSimpleMeasurement};
+use crate::repository::{self, DBSimpleMeasurement, SensorTypeDB};
 
 pub trait ModelFrom<T>: Sized {
     fn model_from(value: T) -> Self;
@@ -26,53 +26,44 @@ impl<T> ModelFrom<T> for T {
     }
 }
 
-impl ModelFrom<&api::SensorType> for repository::SensorType {
-    fn model_from(value: &api::SensorType) -> Self {
-        match value {
-            api::SensorType::Temperature => repository::SensorType::Temperature,
-            api::SensorType::Humidity => repository::SensorType::Humidity,
-            api::SensorType::Airpressure => repository::SensorType::Airpressure,
-            api::SensorType::LightIntensity => repository::SensorType::LightIntensity,
-            api::SensorType::BatteryVoltage => repository::SensorType::BatteryVoltage,
-            api::SensorType::ChipTemperature => repository::SensorType::ChipTemperature,
-            api::SensorType::Co2 => repository::SensorType::Co2,
-        }
-    }
-}
-
-impl ModelFrom<&repository::SensorType> for api::SensorType {
-    fn model_from(value: &repository::SensorType) -> Self {
-        match value {
-            repository::SensorType::Temperature => api::SensorType::Temperature,
-            repository::SensorType::Humidity => api::SensorType::Humidity,
-            repository::SensorType::Airpressure => api::SensorType::Airpressure,
-            repository::SensorType::LightIntensity => api::SensorType::LightIntensity,
-            repository::SensorType::BatteryVoltage => api::SensorType::BatteryVoltage,
-            repository::SensorType::ChipTemperature => api::SensorType::ChipTemperature,
-            repository::SensorType::Co2 => api::SensorType::Co2,
-        }
-    }
-}
-
-impl ModelFrom<&api::Sensor> for repository::Sensor {
-    fn model_from(value: &api::Sensor) -> Self {
-        let sensor_types: Vec<repository::SensorType> = value
+impl ModelFrom<&api::SensorWithTypes> for repository::Sensor {
+    fn model_from(value: &api::SensorWithTypes) -> Self {
+        let sensor_types: Vec<repository::SensorTypeDB> = value
             .sensor_types
             .iter()
-            .map(|st| st.model_into())
+            .map(|st| (*st).into())
             .collect();
-        repository::Sensor::new(&value.reference, &value.name, sensor_types)
+        repository::Sensor::new(&value.get_reference(), &value.get_name(), sensor_types)
     }
 }
 
-impl ModelFrom<&repository::Sensor> for api::Sensor {
+impl ModelFrom<&repository::Sensor> for api::SensorWithTypes {
     fn model_from(value: &repository::Sensor) -> Self {
         let sensor_types: HashSet<api::SensorType> = value
             .sensor_types
             .iter()
-            .map(|st| st.model_into())
+            .map(|st| (*st).model_into())
             .collect();
-        api::Sensor::new(&value.sensor_reference, &value.sensor_name, sensor_types)
+        api::SensorWithTypes::new(&value.sensor_reference,
+            &value.sensor_name, sensor_types.iter().cloned())
+    }
+}
+
+impl ModelFrom<&api::SensorWithWarnLimits> for (repository::Sensor, Vec<repository::SensorTypeWarnLimitsDAO>) {
+    fn model_from(value: &api::SensorWithWarnLimits) -> Self {
+        let sensor_types: Vec<SensorTypeDB> = value
+            .sensor_type_warn_limits
+            .iter()
+            .map(|(st, _warn_limits)| (*st).into())
+            .collect();
+        let warn_limits = Vec::from_iter(
+            value.sensor_type_warn_limits.iter()
+            .map(|(_k, v)| v.model_into())
+        );
+        let sensor = repository::Sensor::new(&value.get_reference(),
+            &value.get_name(), sensor_types);
+
+        (sensor, warn_limits)
     }
 }
 

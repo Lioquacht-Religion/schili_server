@@ -26,6 +26,7 @@ schili_api = { path = "../schili_api" }
 anyhow = "1.0.100"
 lettre = "0.11.21"
 const_format = "0.2.36"
+moka = { version = "0.12.16", features = ["future"] }
 
 [dev-dependencies]
 smol = "2.0.2"

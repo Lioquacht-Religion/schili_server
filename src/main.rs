@@ -1,5 +1,7 @@
+use moka::future::Cache;
+use schili_api::api;
 use sensor_data_server::{
-    config, email, http_server::start_http_server, mqtt_handler::start_mq_client,
+    SensorCache, config, email, http_server::start_http_server, mqtt_handler::start_mq_client,
 };
 
 #[actix_web::main]
@@ -28,7 +30,9 @@ async fn main() -> std::io::Result<()> {
 
     email::send_server_started_email(&config.email);
 
-    start_mq_client(config).await;
+    let cache: SensorCache = SensorCache::new(100);
 
-    start_http_server().await
+    start_mq_client(config, cache.clone()).await;
+
+    start_http_server(cache).await
 }

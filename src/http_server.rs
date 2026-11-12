@@ -19,12 +19,10 @@ use schili_api::api::{
 };
 
 use crate::{
-    config, database,
-    error::{ApiError, DateRangeError},
-    service::{self},
+    SensorCache, config, database, error::{ApiError, DateRangeError}, service::{self},
 };
 
-pub async fn start_http_server() -> std::io::Result<()> {
+pub async fn start_http_server(sensor_cache: SensorCache) -> std::io::Result<()> {
     let pool = database::create_db_pool().await;
     let config = config::get_config().await;
 
@@ -46,6 +44,7 @@ pub async fn start_http_server() -> std::io::Result<()> {
                 app_name: String::from("Schili Sensor Server"),
             }))
             .app_data(web::ThinData(pool.clone()))
+            .app_data(web::ThinData(sensor_cache.clone()))
             .service(web::scope("/app").route("/index.html", web::get().to(index)))
             .service(post_sensor)
             .service(get_sensor)
@@ -79,7 +78,7 @@ async fn get_current_datetime() -> actix_web::Result<impl Responder, ApiError> {
 #[post("/sensor/add")]
 async fn post_sensor(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
-    api_sensor: web::Json<api::Sensor>,
+    api_sensor: web::Json<api::SensorWithWarnLimits>,
 ) -> actix_web::Result<impl Responder, ApiError> {
     //TODO: db error handling, unique indexes,
     // check if sensor with reference already exists

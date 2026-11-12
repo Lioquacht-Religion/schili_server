@@ -4,12 +4,12 @@ use std::str::FromStr;
 
 use anyhow::{Result, anyhow};
 use chrono::{Local, NaiveDateTime, TimeDelta, Utc};
+use schili_api::api::{self, MeasureLimit, SensorType, SensorTypeWarnLimits};
 use sqlx::{
-    PgPool, Pool, Postgres, Row,
-    postgres::{PgRow, types::PgInterval},
-    prelude::FromRow,
-    types::BigDecimal,
+    PgPool, Pool, Postgres, Row, postgres::{PgRow, PgValueRef, types::PgInterval}, prelude::FromRow, types::BigDecimal,
 };
+
+use crate::api_db_conv::{ModelFrom, ModelInto};
 
 pub async fn start_sql_query(
     pool: &Pool<Postgres>,
@@ -30,53 +30,130 @@ pub struct Sensor {
     pub sensor_id: i32,
     pub sensor_reference: String,
     pub sensor_name: String,
-    pub sensor_types: Vec<SensorType>,
+    pub sensor_types: Vec<SensorTypeDB>,
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type)]
-#[sqlx(type_name = "sensor_type", rename_all = "lowercase")]
-pub enum SensorType {
-    Temperature,
-    Humidity,
-    Airpressure,
-    LightIntensity,
-    Co2,
-    BatteryVoltage,
-    ChipTemperature,
+pub struct SensorTypeWarnLimitsDAO{
+     sensor_type: SensorTypeDB,
+     warn_high_num: Option<BigDecimal>,
+     warn_high_timeout: Option<PgInterval>,
+     warn_low_num: Option<BigDecimal>,
+     warn_low_timeout: Option<PgInterval>,
+     warn_increase_num: Option<BigDecimal>,
+     warn_increase_search_interval: Option<PgInterval>,
+     warn_decrease_num: Option<BigDecimal>,
+     warn_decrease_search_interval: Option<PgInterval>,
 }
 
-impl<'r> FromRow<'r, PgRow> for SensorType {
+
+fn measurelimits_from_dao(num: Option<BigDecimal>, interval: Option<PgInterval>) -> Option<MeasureLimit> {
+    if let (Some(num), Some(interval)) = (num, interval){
+        let dur = chrono::Duration::microseconds(interval.microseconds);
+        Some(MeasureLimit::new(num, dur))
+    }
+    else{
+        None
+    }
+}
+
+fn pg_interval_from_dur(duration: chrono::Duration) -> PgInterval{
+    PgInterval { months: 0, days: 0, microseconds: duration.num_microseconds().unwrap_or(0) }
+}
+
+impl From<SensorTypeWarnLimitsDAO> for SensorTypeWarnLimits{
+    fn from(value: SensorTypeWarnLimitsDAO) -> Self {
+        Self {
+            sensor_type: value.sensor_type.model_into(),
+            warn_high: measurelimits_from_dao(value.warn_high_num, value.warn_high_timeout),
+            warn_low: measurelimits_from_dao(value.warn_low_num, value.warn_low_timeout),
+            warn_increase: measurelimits_from_dao(value.warn_increase_num, value.warn_increase_search_interval),
+            warn_decrease: measurelimits_from_dao(value.warn_decrease_num, value.warn_decrease_search_interval),
+        }
+    }
+}
+
+impl ModelFrom<&SensorTypeWarnLimits> for SensorTypeWarnLimitsDAO{
+    fn model_from(value: &SensorTypeWarnLimits) -> Self {
+        Self {
+            sensor_type: value.sensor_type.into(),
+            warn_high_num: value.warn_high.as_ref().map(|n| n.limit.clone()),
+            warn_high_timeout: value.warn_high.as_ref().map(|n| pg_interval_from_dur(n.time_duration)),
+            warn_low_num: value.warn_low.as_ref().map(|n| n.limit.clone()),
+            warn_low_timeout: value.warn_low.as_ref().map(|n| pg_interval_from_dur(n.time_duration)),
+            warn_increase_num: value.warn_increase.as_ref().map(|n| n.limit.clone()),
+            warn_increase_search_interval: value.warn_increase.as_ref().map(|n| pg_interval_from_dur(n.time_duration)),
+            warn_decrease_num: value.warn_decrease.as_ref().map(|n| n.limit.clone()),
+            warn_decrease_search_interval: value.warn_decrease.as_ref().map(|n| pg_interval_from_dur(n.time_duration)),
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SensorTypeDB(api::SensorType);
+
+impl SensorTypeDB{
+    pub fn inner(&self) -> api::SensorType{
+        self.0
+    }
+}
+
+impl From<SensorType> for SensorTypeDB{
+    fn from(value: SensorType) -> Self {
+        SensorTypeDB(value)
+    }
+}
+
+impl ModelFrom<SensorTypeDB> for SensorType{
+    fn model_from(value: SensorTypeDB) -> Self {
+        value.0
+    }
+}
+
+impl<'r> sqlx::Decode<'r, Postgres> for SensorTypeDB{
+    fn decode(value: PgValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
+        let value = <&'r str as sqlx::decode::Decode<'r, Postgres>>::decode(value)?;
+        match SensorType::from_str(value){
+            Ok(st) => Ok(st.into()),
+            Err(()) => Err(
+                format!("invalid value {0:?} for enum {1}", value, "SensorType").into()
+            ),
+        }
+    }
+}
+
+impl<'q, DB: ::sqlx::Database> ::sqlx::encode::Encode<'q, DB> for SensorTypeDB
+where
+    &'q ::std::primitive::str: ::sqlx::encode::Encode<'q, DB>,
+{
+    fn encode_by_ref(
+        &self,
+        buf: &mut <DB as ::sqlx::database::Database>::ArgumentBuffer<'q>,
+    ) -> ::std::result::Result<::sqlx::encode::IsNull, ::sqlx::error::BoxDynError> {
+        let val: &str = (&self.0).into();
+        val.encode(buf)
+    }
+    fn size_hint(&self) -> ::std::primitive::usize {
+        let val: &str = (&self.0).into();
+        val.size_hint()
+    }
+}
+
+impl ::sqlx::Type<::sqlx::Postgres> for SensorTypeDB {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        ::sqlx::postgres::PgTypeInfo::with_name("sensor_type")
+    }
+}
+
+impl ::sqlx::postgres::PgHasArrayType for SensorTypeDB {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        ::sqlx::postgres::PgTypeInfo::array_of("sensor_type")
+    }
+}
+
+impl<'r> FromRow<'r, PgRow> for SensorTypeDB {
     fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
         row.try_get(0)
-    }
-}
-
-impl From<&SensorType> for &str {
-    fn from(value: &SensorType) -> Self {
-        match value {
-            SensorType::Temperature => "temperature",
-            SensorType::Humidity => "humidity",
-            SensorType::Airpressure => "airpressure",
-            SensorType::LightIntensity => "lightintensity",
-            SensorType::ChipTemperature => "chiptemperature",
-            SensorType::BatteryVoltage => "BatteryVoltage",
-            SensorType::Co2 => "co2",
-        }
-    }
-}
-
-impl FromStr for SensorType {
-    type Err = ();
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "temperature" => Ok(SensorType::Temperature),
-            "humidity" => Ok(SensorType::Humidity),
-            "airpressure" => Ok(SensorType::Airpressure),
-            "chiptemperature" => Ok(SensorType::ChipTemperature),
-            "BatteryVoltage" => Ok(SensorType::BatteryVoltage),
-            "co2" => Ok(SensorType::Co2),
-            _ => Err(()),
-        }
     }
 }
 
@@ -263,7 +340,7 @@ impl Sensor {
         id: i32,
         reference: &str,
         name: &str,
-        sensor_types: Vec<SensorType>,
+        sensor_types: Vec<SensorTypeDB>,
     ) -> Self {
         Self {
             sensor_id: id,
@@ -273,7 +350,7 @@ impl Sensor {
         }
     }
 
-    pub fn new(reference: &str, name: &str, sensor_types: Vec<SensorType>) -> Self {
+    pub fn new(reference: &str, name: &str, sensor_types: Vec<SensorTypeDB>) -> Self {
         Self::new_with_id(0, reference, name, sensor_types)
     }
 }
@@ -369,22 +446,62 @@ pub async fn insert_sensor(
 pub async fn insert_sensor_types(
     pool: &PgPool,
     sensor_id: i32,
-    sensor_types: impl Iterator<Item = &SensorType>,
+    sensor_types: &[SensorTypeWarnLimitsDAO],
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let sensor_types_str: Vec<String> = sensor_types
+    let sensor_types_str: Vec<String> = sensor_types.iter()
         .map(|st| {
-            let st_str: &str = st.into();
+            let st_str: &str = (&st.sensor_type.0).into();
             st_str.to_owned()
         })
         .collect();
+
+    fn warn_limits_as_vecs(
+        sensor_types: &[SensorTypeWarnLimitsDAO],
+        get_limit: impl Fn(&SensorTypeWarnLimitsDAO) -> &Option<BigDecimal>,
+        get_timeout: impl Fn(&SensorTypeWarnLimitsDAO) -> &Option<PgInterval>
+    ) -> (Vec<Option<BigDecimal>>, Vec<Option<PgInterval>>){
+        let warn_limits: Vec<Option<BigDecimal>> = sensor_types.iter()
+            .map(|st| get_limit(st).clone())
+            .collect();
+        let warn_timeout: Vec<Option<PgInterval>> = sensor_types.iter()
+            .map(|st| get_timeout(st).clone())
+            .collect();
+        (warn_limits, warn_timeout)
+    }
+
+    let (warn_high_num, warn_high_timeout) = warn_limits_as_vecs(sensor_types, |st| &st.warn_high_num, |st| &st.warn_high_timeout);
+
+    let (warn_low_num, warn_low_timeout) = warn_limits_as_vecs(sensor_types, |st| &st.warn_low_num, |st| &st.warn_low_timeout);
+
+    let (warn_increase_num, warn_increase_timeout) = warn_limits_as_vecs(sensor_types, |st| &st.warn_increase_num, |st| &st.warn_increase_search_interval);
+
+    let (warn_decrease_num, warn_decrease_timeout) = warn_limits_as_vecs(sensor_types, |st| &st.warn_decrease_num, |st| &st.warn_decrease_search_interval);
+
     sqlx::query!(
         r#"
            INSERT INTO sensor_types_link (sensor_id, sensor_type) 
            SELECT $1, sensor_type_arr.* 
-           FROM UNNEST($2::text[]::sensor_type[]) AS sensor_type_arr
+           FROM 
+            UNNEST($2::text[]::sensor_type[]) AS sensor_type_arr,
+            UNNEST($3::numeric[]) AS warn_high_num_arr,
+            UNNEST($4::interval[]) AS warn_high_timeout_arr,
+            UNNEST($5::numeric[]) AS warn_low_num_arr,
+            UNNEST($6::interval[]) AS warn_low_timeout_arr,
+            UNNEST($7::numeric[]) AS warn_increase_num_arr,
+            UNNEST($8::interval[]) AS warn_increase_timeout_arr,
+            UNNEST($9::numeric[]) AS warn_decrease_num_arr,
+            UNNEST($10::interval[]) AS warn_decrease_timeout_arr
         "#,
         sensor_id,
-        &sensor_types_str
+        &sensor_types_str,
+        &warn_high_num as _,
+        &warn_high_timeout as _,
+        &warn_low_num as _,
+        &warn_low_timeout as _,
+        &warn_increase_num as _,
+        &warn_increase_timeout as _,
+        &warn_decrease_num as _,
+        &warn_decrease_timeout as _,
     )
     .execute(pool)
     .await?;
@@ -395,9 +512,14 @@ pub async fn insert_sensor_types(
 pub async fn insert_sensor_with_sensor_types(
     pool: &PgPool,
     sensor: &mut Sensor,
+    warn_limits: &[SensorTypeWarnLimitsDAO]
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
     insert_sensor(pool, sensor).await?;
-    insert_sensor_types(pool, sensor.sensor_id, sensor.sensor_types.iter()).await?;
+    insert_sensor_types(
+        pool, 
+        sensor.sensor_id, 
+        warn_limits
+    ).await?;
     Ok(())
 }
 
@@ -428,7 +550,7 @@ pub async fn find_sensor_and_types_by_ref(
     sensor_ref: &str,
 ) -> anyhow::Result<Sensor> {
     let mut sensor = find_sensor_by_ref(pool, sensor_ref).await?;
-    let sensor_types: Vec<SensorType> = sqlx::query_as(
+    let sensor_types: Vec<SensorTypeDB> = sqlx::query_as(
         r#"
         SELECT stl.sensor_type
         FROM sensor_types_link stl
@@ -468,7 +590,7 @@ pub async fn find_all_sensors(pool: &PgPool) -> anyhow::Result<Vec<Sensor>> {
 pub async fn find_all_sensors_with_filter(
     pool: &PgPool,
     sensor_name_part: &str,
-    sensor_types: &[SensorType],
+    sensor_types: &[SensorTypeDB],
 ) -> anyhow::Result<Vec<Sensor>> {
     let sensors = sqlx::query_as(
         r#"
@@ -491,6 +613,44 @@ pub async fn find_all_sensors_with_filter(
     .fetch_all(pool)
     .await?;
     Ok(sensors)
+}
+
+pub async fn find_sensor_with_warnlimits(
+    pool: &PgPool,
+    sensor_ref: &str
+) -> anyhow::Result<(Sensor, Vec<SensorTypeWarnLimits>)> {
+    let sensor = find_sensor_by_ref(pool, sensor_ref).await
+        .map_err(|e| 
+            anyhow!("Could not find sensor with reference='{}'. Error: {e}", sensor_ref))?;
+    let warn_limits = find_sensor_warnlimits(pool, sensor.sensor_id)
+        .await
+        .map_err(|e| anyhow!("Error while trying to fetch sensor warn limits: {e}"))?;
+    Ok((sensor, warn_limits))
+}
+
+pub async fn find_sensor_warnlimits(
+    pool: &PgPool,
+    sensor_id: i32
+) -> anyhow::Result<Vec<SensorTypeWarnLimits>> {
+    let results = sqlx::query_as!(
+        SensorTypeWarnLimitsDAO,
+        r#"
+        SELECT 
+            st.sensor_type::sensor_type as "sensor_type: SensorTypeDB",
+            st.warn_high_num, st.warn_high_timeout,
+            st.warn_low_num, st.warn_low_timeout, 
+            st.warn_increase_num, st.warn_increase_search_interval, 
+            st.warn_decrease_num, st.warn_decrease_search_interval
+        FROM sensor_types_link st 
+        WHERE st.sensor_id = $1
+        "#,
+        sensor_id
+    )
+        .map(|s| s.into())
+    .fetch_all(pool)
+    .await?;
+
+    Ok(results)
 }
 
 // ++++++++++++++ Temperature - SECTION +++++++++++++++++++++
