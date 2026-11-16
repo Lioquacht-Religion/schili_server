@@ -71,30 +71,19 @@ async fn handle_simple_measurements<'o, 'v>(
                         ));
                     }
                 };
+                let sensor = 
+                    sensor_cache.get_sensor_by_ref(pool, &measurement.sensor_reference).await?;
+                let warn_limits = sensor.sensor_w_warn_limits.sensor_type_warn_limits.get(&sensor_type);
                 match sensor_type {
-                    SensorType::Temperature => {
-                        service::insert_temperature_w_sensor(
-                            pool, &measurement, sensor_cache.clone()
-                        ).await
-                    }
-                    SensorType::Humidity => service::insert_humidity(pool, &measurement).await,
-                    SensorType::Airpressure => {
-                        service::insert_airpressure(pool, &measurement).await
-                    }
-                    SensorType::LightIntensity => {
-                        service::insert_light_intensity(pool, &measurement).await
-                    }
-                    SensorType::BatteryVoltage => {
-                        service::insert_battery_voltage(pool, &measurement).await
-                    }
-                    SensorType::ChipTemperature => {
-                        service::insert_chip_temperature(pool, &measurement).await
-                    }
                     SensorType::Co2 => {
                         return Err(anyhow!(
                             "Measurement type Co2 is not supported by this handler."
                         ));
                     }
+                    _sensor_type => 
+                        service::add_measurement_check_warn_limits(
+                            pool, sensor_type, &sensor, warn_limits, 
+                            &measurement.measure).await,
                 }
             }
             Err(()) => Err(anyhow!(
@@ -131,7 +120,7 @@ async fn handle_co2_measurement<'o, 'v>(
                     }
                 };
                 if let SensorType::Co2 = sensor_type {
-                    service::insert_co2(pool, &measurement).await
+                    service::insert_co2(pool, sensor_cache.clone(), &measurement).await
                 } else {
                     Err(anyhow!(
                         "Measurement type Co2 is not supported by this handler."
@@ -163,7 +152,7 @@ async fn handle_measurements_bundle<'o, 'v>(
                 ));
             }
         };
-        service::insert_bundled_measurements(pool, &mut measurements)
+        service::insert_bundled_measurements(pool, sensor_cache.clone(), &mut measurements)
             .await
             .map_err(|e| {
                 anyhow!(
@@ -192,7 +181,7 @@ async fn handle_errors<'o, 'v>(
                 ));
             }
         };
-        service::insert_sensor_error(pool, &sensor_error)
+        service::insert_sensor_error(pool, sensor_cache.clone(), &sensor_error)
             .await
             .map_err(|e| {
                 anyhow!(

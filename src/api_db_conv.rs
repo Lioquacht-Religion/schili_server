@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use schili_api::api::{self, SensorSimpleMeasurements, SensorTrait};
 
-use crate::repository::{self, DBSimpleMeasurement, SensorTypeDB};
+use crate::repository::{self, DBSimpleMeasurement, SensorMeasurement, SensorTypeDB};
 
 pub trait ModelFrom<T>: Sized {
     fn model_from(value: T) -> Self;
@@ -87,6 +87,31 @@ impl<T: DBSimpleMeasurement> ModelFrom<&api::SensorSingleSimpleMeasure> for (Str
     fn model_from(value: &api::SensorSingleSimpleMeasure) -> Self {
         let measurement: T = (&value.measure).model_into();
         (value.sensor_reference.clone(), measurement)
+    }
+}
+
+impl ModelFrom<SensorMeasurement> for api::SimpleMeasurement{
+    fn model_from(value: SensorMeasurement) -> Self {
+        api::SimpleMeasurement {
+            measurement: value.measurement().clone(),
+            measure_time: value.measure_time().and_utc(),
+        }
+    }
+}
+
+impl ModelFrom<(api::SensorType, api::SimpleMeasurement)> for SensorMeasurement{
+    fn model_from((sensor_type, value): (api::SensorType, api::SimpleMeasurement)) -> Self {
+        SensorMeasurement::new(
+            sensor_type.into(), value.measurement,
+            value.measure_time.naive_local())
+    }
+}
+
+impl ModelFrom<(api::SensorType, &api::SimpleMeasurement)> for SensorMeasurement{
+    fn model_from((sensor_type, value): (api::SensorType, &api::SimpleMeasurement)) -> Self {
+        SensorMeasurement::new(
+            sensor_type.into(), value.measurement.clone(),
+            value.measure_time.naive_local())
     }
 }
 

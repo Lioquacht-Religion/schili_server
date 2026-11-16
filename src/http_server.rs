@@ -19,7 +19,7 @@ use schili_api::api::{
 };
 
 use crate::{
-    SensorCache, config, database, error::{ApiError, DateRangeError}, service::{self},
+    SensorCache, api_db_conv::ModelInto, config, database, error::{ApiError, DateRangeError}, repository::{self}, service::{self},
 };
 
 pub async fn start_http_server(sensor_cache: SensorCache) -> std::io::Result<()> {
@@ -50,7 +50,7 @@ pub async fn start_http_server(sensor_cache: SensorCache) -> std::io::Result<()>
             .service(get_sensor)
             .service(get_all_sensors)
             .service(get_all_sensors_filtered)
-            .service(post_temperature_all)
+            .service(post_measurement_all)
             .service(get_sensor_measurements_range)
             .service(get_sensor_avg_simple_measurement_interval_in_range)
             .service(get_current_datetime)
@@ -120,26 +120,29 @@ async fn get_all_sensors_filtered(
     Ok(web::Json(sensor))
 }
 
-#[post("/sensor/temperature/add/all")]
-async fn post_temperature_all(
+#[post("/sensor/{sensor_ref}/{measurement_kind}/add/all")]
+async fn post_measurement_all(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
-    api_temp_measures: web::Json<api::SensorSimpleMeasurements>,
+    ThinData(sensor_cache): web::ThinData<SensorCache>,
+    path: web::Path<(String, String)>,
+    api_temp_measures: web::Json<Vec<api::SimpleMeasurement>>,
 ) -> actix_web::Result<impl Responder, ApiError> {
-    match service::insert_temperatures_all(&pool, &api_temp_measures).await {
-        Ok(()) => Ok("Added sensor temperature measurements."),
-        Err(e) => Err(ApiError::from(e)),
-    }
-}
-
-#[post("/sensor/humidity/add/all")]
-async fn post_humidity_all(
-    ThinData(pool): web::ThinData<Pool<Postgres>>,
-    api_temp_measures: web::Json<api::SensorSimpleMeasurements>,
-) -> actix_web::Result<impl Responder, ApiError> {
-    match service::insert_temperatures_all(&pool, &api_temp_measures).await {
-        Ok(()) => Ok("Added sensor humidity measurements."),
-        Err(e) => Err(ApiError::from(e)),
-    }
+    let (sensor_ref, measurement_kind) = path.into_inner();
+    let sensor = sensor_cache.get_sensor_by_ref(&pool, &sensor_ref).await?;
+    let measure_type: SensorType = SensorType::from_str(&measurement_kind)
+        .map_err(|()| anyhow!("Measurement kind not allowed."))?;
+    //let measure_type : SensorTypeDB = measure_type.into();
+    let mut measurements = api_temp_measures.into_inner()
+        .into_iter()
+        .map(|m| (measure_type, m).model_into())
+        .collect();
+    repository::insert_sensor_measurements(
+        &pool, sensor.sensor_id, &mut measurements
+    ).await
+        .map_err(
+            |e| anyhow!("Failed to insert measurements. Error: {e}")
+        )?;
+    Ok("Added sensor temperature measurements.")
 }
 
 #[get(

@@ -1,5 +1,3 @@
-use moka::future::Cache;
-use schili_api::api;
 use sensor_data_server::{
     SensorCache, config, email, http_server::start_http_server, mqtt_handler::start_mq_client,
 };

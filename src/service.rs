@@ -1,19 +1,17 @@
 // service.rs
 
-use std::{collections::HashMap, sync::Arc};
-
 use anyhow::anyhow;
-use bigdecimal::{BigDecimal, FromPrimitive, Signed};
-use chrono::{Local, TimeDelta};
-use log::{error, info};
+use bigdecimal::{BigDecimal, Signed};
+use chrono::Local;
+use log::info;
 use schili_api::api::{
-    self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SensorType, SensorWithWarnLimitsAndDBId, SimpleMeasurement,
+    self, GetSensorSimpleMeasuresIntervalsRange, GetSensorSimpleMeasuresRange, SensorType, SensorTypeWarnLimits, SensorWithWarnLimitsAndDBId, SimpleMeasurement,
 };
 use sqlx::{Pool, Postgres};
 
 use crate::{
     SensorCache, api_db_conv::ModelInto, config, email, repository::{
-        self, AirPressure, AvgMeasureTimeInterval, BatteryVoltage, ChipTemperature, DBSimpleMeasurement, Humidity, LightIntensity, Temperature,
+        self, AvgMeasureTimeInterval, DBSimpleMeasurement, SensorMeasurement
     },
 };
 
@@ -76,22 +74,6 @@ pub async fn get_all_sensors_filtered(
 
 // ++++++++++++++ Temperature - SECTION +++++++++++++++++++++
 
-enum TempStatus {
-    HighTemp,
-    LowTemp,
-    StrongTempIncrease {
-        prev_temp: BigDecimal,
-        diff_temp: BigDecimal,
-    },
-    StrongTempDecrease {
-        prev_temp: BigDecimal,
-        diff_temp: BigDecimal,
-    },
-    NormalTemp,
-}
-
-const TEMP_CHANGE_WARNING: i32 = 10;
-
 pub async fn insert_temperature_w_sensor<'a, 'b>(
     pool: &'a Pool<Postgres>,
     api_temp_measure: &api::SensorSingleSimpleMeasure,
@@ -111,55 +93,50 @@ pub async fn insert_temperature_w_sensor<'a, 'b>(
     Ok(())
 }
 
-pub async fn insert_measurement<'a, 'b>(
+pub(crate) async fn add_measurement_check_warn_limits(
+    pool: &Pool<Postgres>,
+    sensor_type: SensorType,
+    sensor: &SensorWithWarnLimitsAndDBId,
+    warn_limits: Option<&SensorTypeWarnLimits>,
+    api_measure: &api::SimpleMeasurement,
+) -> anyhow::Result<()> {
+    let mut m = (sensor_type, api_measure).model_into();
+    let cur_datetime = &Local::now();
+
+    let cur_measurement = &api_measure.measurement;
+    check_warn_limits_and_send_emails(
+        pool, sensor, warn_limits, cur_measurement, cur_datetime
+    ).await?;
+    repository::insert_single_sensor_measurement(
+        pool, sensor.sensor_id, &mut m)
+        .await
+}
+
+async fn check_warn_limits_and_send_emails(
+    pool: &Pool<Postgres>,
+    sensor: &SensorWithWarnLimitsAndDBId,
+    warn_limits: Option<&SensorTypeWarnLimits>,
+    cur_measurement: &BigDecimal,
+    cur_datetime: &chrono::DateTime<Local>,
+) -> anyhow::Result<()>{
+    if let Some(warn_limits) = warn_limits{
+        handle_measurement_warning_email(
+            pool, &sensor, warn_limits, cur_measurement, cur_datetime).await?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn insert_measurement<'a, 'b>(
     pool: &'a Pool<Postgres>,
     sensor_id: i32,
     sensor_type: SensorType,
     api_measure: &api::SimpleMeasurement,
 ) -> anyhow::Result<()> {
+    let mut m: SensorMeasurement = (sensor_type, api_measure).model_into();
     match sensor_type {
-        SensorType::Temperature => add_temperature_measurement(pool, sensor_id, api_measure).await,
-        SensorType::Humidity => {
-            repository::insert_single_sensor_humidity(
-                pool,
-                sensor_id,
-                &mut api_measure.model_into(),
-            )
-            .await
-        }
-        SensorType::Airpressure => {
-            repository::insert_single_sensor_airpressure(
-                pool,
-                sensor_id,
-                &mut api_measure.model_into(),
-            )
-            .await
-        }
-        SensorType::LightIntensity => {
-            repository::insert_single_sensor_lightintensity(
-                pool,
-                sensor_id,
-                &mut api_measure.model_into(),
-            )
-            .await
-        }
-        SensorType::BatteryVoltage => {
-            repository::insert_single_sensor_battery_voltage(
-                pool,
-                sensor_id,
-                &mut api_measure.model_into(),
-            )
-            .await
-        }
-        SensorType::ChipTemperature => {
-            repository::insert_single_sensor_chip_temperature(
-                pool,
-                sensor_id,
-                &mut api_measure.model_into(),
-            )
-            .await
-        }
         SensorType::Co2 => Err(anyhow!("Measurement type CO2 is not supported.")),
+        _sensor_type => repository::insert_single_sensor_measurement(pool, sensor_id, &mut m).await
+
     }
     .map_err(|e| {
         anyhow!(
@@ -177,91 +154,98 @@ pub async fn insert_measurement<'a, 'b>(
     Ok(())
 }
 
-async fn add_temperature_measurement(
-    pool: &Pool<Postgres>,
-    sensor_id: i32,
-    api_measure: &api::SimpleMeasurement,
-) -> anyhow::Result<()> {
-    let cur_datetime = &Local::now();
-
-    let cur_temp = &api_measure.measurement;
-    handle_temp_warning_email(pool, sensor_id, cur_temp, cur_datetime).await;
-    repository::insert_single_sensor_temperature(pool, sensor_id, &mut api_measure.model_into())
-        .await
+enum WarnLimitStatus {
+    HighMeasure,
+    LowMeasure,
+    StrongIncreaseMeasure {
+        prev_temp: BigDecimal,
+        diff_temp: BigDecimal,
+    },
+    StrongDecreaseMeasure {
+        prev_temp: BigDecimal,
+        diff_temp: BigDecimal,
+    },
+    NormalMeasure,
 }
 
-async fn handle_temp_warning_email(
+async fn handle_measurement_warning_email(
     pool: &Pool<Postgres>,
-    sensor_id: i32,
-    cur_temp: &BigDecimal,
+    sensor: &SensorWithWarnLimitsAndDBId,
+    warn_limits: &SensorTypeWarnLimits,
+    cur_measurement: &BigDecimal,
     cur_datetime: &chrono::DateTime<Local>,
-) {
-    let temp_status: TempStatus = if let Ok(Temperature {
-        temp_celsius: prev_temp,
+) -> anyhow::Result<()>{
+    let temp_status: WarnLimitStatus = if let Ok(repository::SimpleMeasurement {
+        measurement: prev_temp,
         measure_time: prev_time,
         ..
     }) =
-        repository::find_sensor_last_temperature_before_at_datetime(pool, sensor_id, cur_datetime)
+        repository::find_sensor_last_measurement_before_at_datetime(pool, sensor.sensor_id, warn_limits.sensor_type.into(), cur_datetime)
             .await
     {
-        //TODO: make high, low, increase, decrease dynamically specifyable
-        //TODO: cache those seldom changing values with moka or smth
-        let bd_32 = 32.into();
-        let bd_3 = 3.into();
-        if cur_temp >= &bd_32
-            && !(&prev_temp >= &bd_32
-                && cur_datetime.naive_local() - prev_time <= TimeDelta::minutes(30))
+        if let Some(high_limit) = &warn_limits.warn_high 
+            && cur_measurement >= &high_limit.limit
+            && !(&prev_temp >= &high_limit.limit
+                && cur_datetime.naive_local() - prev_time <= high_limit.time_duration)
         {
-            TempStatus::HighTemp
-        } else if cur_temp <= &bd_3
-            && !(&prev_temp >= &bd_3
-                && cur_datetime.naive_local() - prev_time <= TimeDelta::minutes(30))
+            WarnLimitStatus::HighMeasure
+        } else if let Some(low_limit) = &warn_limits.warn_low 
+            && cur_measurement <= &low_limit.limit
+            && !(&prev_temp >= &low_limit.limit
+                && cur_datetime.naive_local() - prev_time <= low_limit.time_duration)
         {
-            TempStatus::LowTemp
+            WarnLimitStatus::LowMeasure
         } else {
-            let diff_temp: BigDecimal = cur_temp - &prev_temp;
-            if &diff_temp >= &TEMP_CHANGE_WARNING.into() {
-                TempStatus::StrongTempIncrease {
+            let diff_temp: BigDecimal = cur_measurement - &prev_temp;
+            if let Some(warn_increase) = &warn_limits.warn_increase 
+                && &diff_temp >= &warn_increase.limit {
+                WarnLimitStatus::StrongIncreaseMeasure {
                     prev_temp,
                     diff_temp,
                 }
-            } else if diff_temp.is_negative() && &diff_temp.abs() >= &TEMP_CHANGE_WARNING.into() {
-                TempStatus::StrongTempDecrease {
+            } else if let Some(warn_decrease) = &warn_limits.warn_decrease
+                && diff_temp.is_negative() 
+                && &diff_temp.abs() >= &warn_decrease.limit {
+                WarnLimitStatus::StrongDecreaseMeasure {
                     prev_temp,
                     diff_temp,
                 }
             } else {
-                TempStatus::NormalTemp
+                WarnLimitStatus::NormalMeasure
             }
         }
     } else {
-        if cur_temp >= &32.into() {
-            TempStatus::HighTemp
-        } else if cur_temp <= &3.into() {
-            TempStatus::LowTemp
+        if let Some(warn_high) = &warn_limits.warn_high 
+            && cur_measurement >= &warn_high.limit {
+            WarnLimitStatus::HighMeasure
+        } else if let Some(warn_low) = &warn_limits.warn_low 
+            && cur_measurement <= &warn_low.limit {
+            WarnLimitStatus::LowMeasure
         } else {
-            TempStatus::NormalTemp
+            WarnLimitStatus::NormalMeasure
         }
     };
 
     let email_config = &config::get_config().await.email;
     match temp_status {
-        TempStatus::HighTemp => email::send_high_temp_warning_email(&email_config, &cur_temp),
-        TempStatus::LowTemp => email::send_low_temp_warning_email(&email_config, &cur_temp),
-        TempStatus::StrongTempIncrease {
+        WarnLimitStatus::HighMeasure => email::send_high_temp_warning_email(&email_config, &cur_measurement),
+        WarnLimitStatus::LowMeasure => email::send_low_temp_warning_email(&email_config, &cur_measurement),
+        WarnLimitStatus::StrongIncreaseMeasure {
             prev_temp,
             diff_temp,
         } => {
-            email::send_strong_temp_increase_email(&email_config, &cur_temp, &prev_temp, &diff_temp)
+            email::send_strong_temp_increase_email(&email_config, &cur_measurement, &prev_temp, &diff_temp)
         }
-        TempStatus::StrongTempDecrease {
+        WarnLimitStatus::StrongDecreaseMeasure {
             prev_temp,
             diff_temp,
         } => {
-            email::send_strong_temp_decrease_email(&email_config, &cur_temp, &prev_temp, &diff_temp)
+            email::send_strong_temp_decrease_email(&email_config, &cur_measurement, &prev_temp, &diff_temp)
         }
-        TempStatus::NormalTemp => {}
+        WarnLimitStatus::NormalMeasure => {}
     }
+
+    Ok(())
 }
 
 pub async fn insert_simple_measurement<'a, 'b, 'c, T, Fut, F>(
@@ -291,27 +275,6 @@ where
     Ok(())
 }
 
-pub async fn insert_temperatures_all(
-    pool: &Pool<Postgres>,
-    api_temp_measures: &api::SensorSimpleMeasurements,
-) -> anyhow::Result<()> {
-    let (sensor_ref, mut db_temps): (String, Vec<repository::Temperature>) =
-        (&*api_temp_measures).model_into();
-    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
-        .await
-        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
-    repository::insert_sensor_temperature_measures(&pool, sensor.sensor_id, &mut db_temps)
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "Could not add temperature measurements for sensor with reference='{}'.",
-                sensor_ref
-            )
-        })?;
-
-    Ok(())
-}
-
 pub async fn get_sensor_measurements_in_range(
     pool: &Pool<Postgres>,
     sensor_temp_range: &GetSensorSimpleMeasuresRange,
@@ -326,56 +289,13 @@ pub async fn get_sensor_measurements_in_range(
             )
         })?;
     let result = match measurement_kind {
-        SensorType::Temperature => {
-            repository::find_sensor_temperatures_in_timerange(
-                &pool,
-                sensor.sensor_id,
-                &sensor_temp_range.start_datetime,
-                &sensor_temp_range.end_datetime,
-            )
-            .await
-        }
-        SensorType::Humidity => {
-            repository::find_sensor_humidities_in_timerange(
-                &pool,
-                sensor.sensor_id,
-                &sensor_temp_range.start_datetime,
-                &sensor_temp_range.end_datetime,
-            )
-            .await
-        }
-        SensorType::Airpressure => {
-            repository::find_sensor_airpressures_in_timerange(
-                &pool,
-                sensor.sensor_id,
-                &sensor_temp_range.start_datetime,
-                &sensor_temp_range.end_datetime,
-            )
-            .await
-        }
-        SensorType::LightIntensity => {
-            repository::find_sensor_lightintensities_in_timerange(
-                &pool,
-                sensor.sensor_id,
-                &sensor_temp_range.start_datetime,
-                &sensor_temp_range.end_datetime,
-            )
-            .await
-        }
+
         SensorType::Co2 => todo!(),
-        SensorType::BatteryVoltage => {
-            repository::find_sensor_batteryvolt_in_timerange(
+        _sensor_type=> {
+            repository::find_sensor_measurements_in_timerange(
                 &pool,
                 sensor.sensor_id,
-                &sensor_temp_range.start_datetime,
-                &sensor_temp_range.end_datetime,
-            )
-            .await
-        }
-        SensorType::ChipTemperature => {
-            repository::find_sensor_chiptemperature_in_timerange(
-                &pool,
-                sensor.sensor_id,
+                measurement_kind.into(),
                 &sensor_temp_range.start_datetime,
                 &sensor_temp_range.end_datetime,
             )
@@ -420,61 +340,12 @@ pub async fn get_sensor_avg_measurements_by_intervals_in_range(
             )
         })?;
     let result = match measurement_kind {
-        SensorType::Temperature => {
-            repository::find_sensor_avg_temperatures_by_intervals_in_timerange(
-                &pool,
-                sensor.sensor_id,
-                &sensor_temp_range.start_datetime,
-                &sensor_temp_range.end_datetime,
-                sensor_temp_range.interval,
-            )
-            .await
-        }
-        SensorType::Humidity => {
-            repository::find_sensor_avg_humidities_by_intervals_in_timerange(
-                &pool,
-                sensor.sensor_id,
-                &sensor_temp_range.start_datetime,
-                &sensor_temp_range.end_datetime,
-                sensor_temp_range.interval,
-            )
-            .await
-        }
-        SensorType::Airpressure => {
-            repository::find_sensor_avg_airpressures_by_intervals_in_timerange(
-                &pool,
-                sensor.sensor_id,
-                &sensor_temp_range.start_datetime,
-                &sensor_temp_range.end_datetime,
-                sensor_temp_range.interval,
-            )
-            .await
-        }
-        SensorType::LightIntensity => {
-            repository::find_sensor_avg_airpressures_by_intervals_in_timerange(
-                &pool,
-                sensor.sensor_id,
-                &sensor_temp_range.start_datetime,
-                &sensor_temp_range.end_datetime,
-                sensor_temp_range.interval,
-            )
-            .await
-        }
         SensorType::Co2 => todo!(),
-        SensorType::BatteryVoltage => {
-            repository::find_sensor_avg_battvolt_by_intervals_in_timerange(
+        _sensor_type => {
+            repository::find_sensor_avg_measurements_by_intervals_in_timerange(
                 &pool,
                 sensor.sensor_id,
-                &sensor_temp_range.start_datetime,
-                &sensor_temp_range.end_datetime,
-                sensor_temp_range.interval,
-            )
-            .await
-        }
-        SensorType::ChipTemperature => {
-            repository::find_sensor_avg_chip_temperature_by_intervals_in_timerange(
-                &pool,
-                sensor.sensor_id,
+                measurement_kind.into(),
                 &sensor_temp_range.start_datetime,
                 &sensor_temp_range.end_datetime,
                 sensor_temp_range.interval,
@@ -506,220 +377,15 @@ pub async fn get_sensor_avg_measurements_by_intervals_in_range(
     Ok(api_temps)
 }
 
-// ++++++++++++++ Humidity - SECTION +++++++++++++++++++++
-
-pub async fn insert_humidity<'a, 'b>(
-    pool: &'a Pool<Postgres>,
-    api_temp_measure: &api::SensorSingleSimpleMeasure,
-) -> anyhow::Result<()> {
-    let (sensor_ref, mut db_temp): (String, Humidity) = (&*api_temp_measure).model_into();
-
-    if let Err(e) = insert_simple_measurement(
-        pool,
-        "humidity",
-        &sensor_ref,
-        &mut db_temp,
-        repository::insert_single_sensor_humidity,
-    )
-    .await
-    {
-        error!("Could not insert humidities from mq publish. error: {}", e);
-    }
-
-    info!(
-        "sensor temps: {}",
-        serde_json::to_string(api_temp_measure).unwrap()
-    );
-    Ok(())
-}
-
-pub async fn insert_humidities_all(
-    pool: &Pool<Postgres>,
-    api_temp_measures: &api::SensorSimpleMeasurements,
-) -> anyhow::Result<()> {
-    let (sensor_ref, mut db_temps): (String, Vec<repository::Humidity>) =
-        (&*api_temp_measures).model_into();
-    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
-        .await
-        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
-    repository::insert_sensor_humidity_measures(&pool, sensor.sensor_id, &mut db_temps)
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "Could not add humidity measurements for sensor with reference='{}'.",
-                sensor_ref
-            )
-        })?;
-
-    Ok(())
-}
-
-// ++++++++++++++ Airpressure - SECTION +++++++++++++++++++++
-
-pub async fn insert_airpressure<'a>(
-    pool: &'a Pool<Postgres>,
-    api_temp_measure: &api::SensorSingleSimpleMeasure,
-) -> anyhow::Result<()> {
-    let (sensor_ref, mut db_temp): (String, AirPressure) = (&*api_temp_measure).model_into();
-
-    if let Err(e) = insert_simple_measurement(
-        pool,
-        "air pressure",
-        &sensor_ref,
-        &mut db_temp,
-        repository::insert_single_sensor_airpressure,
-    )
-    .await
-    {
-        error!(
-            "Could not insert air pressures from mq publish. error: {}",
-            e
-        );
-    }
-
-    info!(
-        "sensor air pressures: {}",
-        serde_json::to_string(api_temp_measure).unwrap()
-    );
-    Ok(())
-}
-
-pub async fn insert_airpressure_all(
-    pool: &Pool<Postgres>,
-    api_temp_measures: &api::SensorSimpleMeasurements,
-) -> anyhow::Result<()> {
-    let (sensor_ref, mut db_temps): (String, Vec<repository::AirPressure>) =
-        (&*api_temp_measures).model_into();
-    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
-        .await
-        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
-    repository::insert_sensor_airpressure_measures(&pool, sensor.sensor_id, &mut db_temps)
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "Could not add air pressure measurements for sensor with reference='{}'.",
-                sensor_ref
-            )
-        })?;
-
-    Ok(())
-}
-
-// ++++++++++++++ Lightintensity - SECTION +++++++++++++++++++++
-
-pub async fn insert_light_intensity<'a>(
-    pool: &'a Pool<Postgres>,
-    api_light_measure: &api::SensorSingleSimpleMeasure,
-) -> anyhow::Result<()> {
-    let (sensor_ref, mut db_temp): (String, LightIntensity) = (&*api_light_measure).model_into();
-
-    if let Err(e) = insert_simple_measurement(
-        pool,
-        "light intensity",
-        &sensor_ref,
-        &mut db_temp,
-        repository::insert_single_sensor_lightintensity,
-    )
-    .await
-    {
-        error!(
-            "Could not insert light intensities from mq publish. error: {}",
-            e
-        );
-    }
-
-    info!(
-        "sensor light intensities: {}",
-        serde_json::to_string(api_light_measure).unwrap()
-    );
-    Ok(())
-}
-
-// ++++++++++++++ Chip temperature - SECTION +++++++++++++++++++++
-
-pub async fn insert_chip_temperature<'a>(
-    pool: &'a Pool<Postgres>,
-    api_temp_measure: &api::SensorSingleSimpleMeasure,
-) -> anyhow::Result<()> {
-    let email_config = &config::get_config().await.email;
-    if &api_temp_measure.measure.measurement >= &60.into() {
-        email::send_high_chip_temp_warning_email(
-            &email_config,
-            &api_temp_measure.measure.measurement,
-        );
-    }
-    let (sensor_ref, mut db_temp): (String, ChipTemperature) = (&*api_temp_measure).model_into();
-
-    if let Err(e) = insert_simple_measurement(
-        pool,
-        "chip temperature",
-        &sensor_ref,
-        &mut db_temp,
-        repository::insert_single_sensor_chip_temperature,
-    )
-    .await
-    {
-        error!(
-            "Could not insert chip temperature from mq publish. error: {}",
-            e
-        );
-    }
-
-    info!(
-        "sensor chip temperature: {}",
-        serde_json::to_string(api_temp_measure).unwrap()
-    );
-    Ok(())
-}
-
-// ++++++++++++++ Battery voltage - SECTION +++++++++++++++++++++
-
-pub async fn insert_battery_voltage<'a>(
-    pool: &'a Pool<Postgres>,
-    api_battvolt_measure: &api::SensorSingleSimpleMeasure,
-) -> anyhow::Result<()> {
-    let email_config = &config::get_config().await.email;
-    if &api_battvolt_measure.measure.measurement
-        <= &BigDecimal::from_f32(0.48).expect("f32 Number should be representable by bigdecimal.")
-    {
-        email::send_low_batt_voltage_warning_email(
-            &email_config,
-            &api_battvolt_measure.measure.measurement,
-        );
-    }
-    let (sensor_ref, mut db_temp): (String, BatteryVoltage) = (&*api_battvolt_measure).model_into();
-
-    if let Err(e) = insert_simple_measurement(
-        pool,
-        "battery voltage",
-        &sensor_ref,
-        &mut db_temp,
-        repository::insert_single_sensor_battery_voltage,
-    )
-    .await
-    {
-        error!(
-            "Could not insert battery voltage from mq publish. error: {}",
-            e
-        );
-    }
-    info!(
-        "sensor battery voltage: {}",
-        serde_json::to_string(api_battvolt_measure).unwrap()
-    );
-    Ok(())
-}
-
 // ++++++++++++++ CO2 - SECTION +++++++++++++++++++++
 
 pub async fn insert_co2(
     pool: &Pool<Postgres>,
+    sensor_cache: SensorCache,
     api_co2_measure: &api::SensorSingleCo2Measure,
 ) -> anyhow::Result<()> {
     let (sensor_ref, mut db_co2): (String, repository::Co2) = (&*api_co2_measure).model_into();
-    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
-        .await
-        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
+    let sensor = sensor_cache.get_sensor_by_ref(pool, &sensor_ref).await?;
     repository::insert_single_sensor_co2_measure(&pool, sensor.sensor_id, &mut db_co2)
         .await
         .map_err(|_| {
@@ -736,22 +402,17 @@ pub async fn insert_co2(
 
 pub async fn insert_bundled_measurements(
     pool: &Pool<Postgres>,
+    sensor_cache: SensorCache,
     api_measurements: &mut api::SensorTypedSimpleMeasurements,
 ) -> anyhow::Result<(), Vec<anyhow::Error>> {
     let sensor_ref = &api_measurements.sensor_reference;
-    // TODO: check if results of these two queries can be cached
-    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
-        .await
-        .map_err(|_| {
-            vec![anyhow!(
-                "Could not find sensor by reference='{}'.",
-                sensor_ref
-            )]
-        })?;
+    let sensor = sensor_cache.get_sensor_by_ref(pool, sensor_ref).await.map_err(|e| vec![e])?;
 
     let mut errors: Vec<anyhow::Error> = Vec::new();
     for m in api_measurements.measurements.iter() {
-        if let Err(e) = insert_measurement(pool, sensor.sensor_id, m.sensor_type, &m.measure).await
+        let warn_limits = sensor.sensor_w_warn_limits.sensor_type_warn_limits.get(&m.sensor_type);
+        if let Err(e) = add_measurement_check_warn_limits(
+            pool, m.sensor_type, &sensor, warn_limits, &m.measure).await
         {
             errors.push(e);
         }
@@ -767,13 +428,12 @@ pub async fn insert_bundled_measurements(
 
 pub async fn insert_sensor_error(
     pool: &Pool<Postgres>,
+    sensor_cache: SensorCache,
     api_sensor_error: &api::SensorError,
 ) -> anyhow::Result<()> {
     let (sensor_ref, mut db_sensor_error): (String, repository::SensorError) =
         (&*api_sensor_error).model_into();
-    let sensor: repository::Sensor = repository::find_sensor_by_ref(&pool, &sensor_ref)
-        .await
-        .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
+    let sensor = sensor_cache.get_sensor_by_ref(pool, &sensor_ref).await?;
     repository::insert_single_sensor_error(&pool, sensor.sensor_id, &mut db_sensor_error)
         .await
         .map_err(|_| {

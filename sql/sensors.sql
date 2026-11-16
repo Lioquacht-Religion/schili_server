@@ -73,8 +73,6 @@ CREATE TABLE air_pressures (
 
 ALTER TABLE air_pressures ALTER COLUMN air_pressure_pa TYPE numeric(32,9);
 
-DROP TABLE light_intesities;
-
 CREATE TABLE light_intensities(
 	light_intensity_id bigint PRIMARY KEY
 	GENERATED ALWAYS AS IDENTITY,
@@ -115,3 +113,33 @@ CREATE TABLE sensor_errors(
 	error_text text NOT NULL,
 	error_time timestamp NOT NULL
 );
+
+CREATE TABLE sensor_measurements(
+	sensor_measurement_id bigint PRIMARY KEY
+	GENERATED ALWAYS AS IDENTITY,
+	sensor_id integer 
+	REFERENCES sensors (sensor_id) NOT NULL,
+	measure_type sensor_type NOT NULL,
+	measurement numeric(32, 9) NOT NULL,
+	measure_time timestamp NOT NULL
+);
+
+INSERT INTO sensor_measurements (sensor_id, measure_type, measurement, measure_time)
+SELECT sensor_id, 'temperature'::sensor_type, temp_celsius, measure_time
+FROM temperatures
+UNION
+SELECT sensor_id, 'humidity'::sensor_type, humidity_percent, measure_time
+FROM humidities
+UNION
+SELECT sensor_id, 'chiptemperature'::sensor_type, temp_celsius, measure_time
+FROM chip_temperatures
+UNION
+SELECT sensor_id, 'airpressure'::sensor_type, air_pressure_pa, measure_time
+FROM air_pressures
+UNION
+SELECT sensor_id, 'batteryvoltage'::sensor_type, battery_volt, measure_time
+FROM battery_voltages
+UNION
+SELECT sensor_id, 'lightintensity'::sensor_type, light_intensity, measure_time
+FROM light_intensities
+;
