@@ -228,19 +228,19 @@ async fn handle_measurement_warning_email(
 
     let email_config = &config::get_config().await.email;
     match temp_status {
-        WarnLimitStatus::HighMeasure => email::send_high_temp_warning_email(&email_config, &cur_measurement),
-        WarnLimitStatus::LowMeasure => email::send_low_temp_warning_email(&email_config, &cur_measurement),
+        WarnLimitStatus::HighMeasure => email::send_high_measurement_warning_email(&email_config, warn_limits.sensor_type, &cur_measurement),
+        WarnLimitStatus::LowMeasure => email::send_low_measurement_warning_email(&email_config, warn_limits.sensor_type, &cur_measurement),
         WarnLimitStatus::StrongIncreaseMeasure {
             prev_temp,
             diff_temp,
         } => {
-            email::send_strong_temp_increase_email(&email_config, &cur_measurement, &prev_temp, &diff_temp)
+            email::send_measured_strong_increase_email(&email_config, warn_limits.sensor_type, &cur_measurement, &prev_temp, &diff_temp)
         }
         WarnLimitStatus::StrongDecreaseMeasure {
             prev_temp,
             diff_temp,
         } => {
-            email::send_strong_temp_decrease_email(&email_config, &cur_measurement, &prev_temp, &diff_temp)
+            email::send_measured_strong_decrease_email(&email_config, warn_limits.sensor_type, &cur_measurement, &prev_temp, &diff_temp)
         }
         WarnLimitStatus::NormalMeasure => {}
     }
