@@ -228,19 +228,19 @@ async fn handle_measurement_warning_email(
 
     let email_config = &config::get_config().await.email;
     match temp_status {
-        WarnLimitStatus::HighMeasure => email::send_high_measurement_warning_email(&email_config, warn_limits.sensor_type, &cur_measurement),
-        WarnLimitStatus::LowMeasure => email::send_low_measurement_warning_email(&email_config, warn_limits.sensor_type, &cur_measurement),
+        WarnLimitStatus::HighMeasure => email::send_high_measurement_warning_email(&email_config, warn_limits.sensor_type, &cur_measurement, cur_datetime),
+        WarnLimitStatus::LowMeasure => email::send_low_measurement_warning_email(&email_config, warn_limits.sensor_type, &cur_measurement, cur_datetime),
         WarnLimitStatus::StrongIncreaseMeasure {
             prev_temp,
             diff_temp,
         } => {
-            email::send_measured_strong_increase_email(&email_config, warn_limits.sensor_type, &cur_measurement, &prev_temp, &diff_temp)
+            email::send_measured_strong_increase_email(&email_config, warn_limits.sensor_type, &cur_measurement, &prev_temp, &diff_temp, cur_datetime)
         }
         WarnLimitStatus::StrongDecreaseMeasure {
             prev_temp,
             diff_temp,
         } => {
-            email::send_measured_strong_decrease_email(&email_config, warn_limits.sensor_type, &cur_measurement, &prev_temp, &diff_temp)
+            email::send_measured_strong_decrease_email(&email_config, warn_limits.sensor_type, &cur_measurement, &prev_temp, &diff_temp, cur_datetime)
         }
         WarnLimitStatus::NormalMeasure => {}
     }
@@ -290,7 +290,7 @@ pub async fn get_sensor_measurements_in_range(
         })?;
     let result = match measurement_kind {
 
-        SensorType::Co2 => todo!(),
+        SensorType::Co2 => Err(anyhow!("Co2 measurements are currently not supported!")),
         _sensor_type=> {
             repository::find_sensor_measurements_in_timerange(
                 &pool,

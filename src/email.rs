@@ -1,6 +1,7 @@
 // email.rs
 
 use bigdecimal::BigDecimal;
+use chrono::Local;
 use lettre::{
     Message, SmtpTransport, Transport,
     message::{Mailbox, header::ContentType},
@@ -33,10 +34,12 @@ pub fn send_server_started_email(email_conf: &EmailConfig) {
 pub(crate) fn send_high_measurement_warning_email(
     email_conf: &EmailConfig,
     measure_type: SensorType,
-    measurement: &BigDecimal
+    measurement: &BigDecimal,
+    measure_time: &chrono::DateTime<Local>
 ) {
     let german_name = get_measure_type_name_german(measure_type);
     let german_unit = get_measure_type_unit_german(measure_type);
+    let measure_time_formatted = measure_time.format("%d.%m.%Y %H:%M:%S");
     let email_text = format!(
         r#"
         <!DOCTYPE html>
@@ -47,11 +50,11 @@ pub(crate) fn send_high_measurement_warning_email(
           </head>
           <body>
             <h1>Hohe(r) {german_name} wurde gerade gemessen!</h1>
-            <h1>{german_name}: {} {german_unit}</h1>
+            <h1>{german_name}: {measurement} {german_unit}</h1>
+            <h1>Uhrzeit: {measure_time_formatted} </h1>
           </body>
         </html>
-        "#,
-        measurement
+        "#
     );
     send_email_log_error(email_conf, &format!("Hohe(r) {german_name}"), email_text);
 }
@@ -60,9 +63,11 @@ pub(crate) fn send_low_measurement_warning_email(
     email_conf: &EmailConfig,
     measure_type: SensorType,
     measurement: &BigDecimal,
+    measure_time: &chrono::DateTime<Local>
 ) {
     let german_name = get_measure_type_name_german(measure_type);
     let german_unit = get_measure_type_unit_german(measure_type);
+    let measure_time_formatted = measure_time.format("%d.%m.%Y %H:%M:%S");
     let email_text = format!(
         r#"
         <!DOCTYPE html>
@@ -74,6 +79,7 @@ pub(crate) fn send_low_measurement_warning_email(
           <body>
             <h1>Niedrige(r) {german_name} wurde gerade gemessen!</h1>
             <h1>{german_name}: {measurement} {german_unit}</h1>
+            <h1>Uhrzeit: {measure_time_formatted} </h1>
           </body>
         </html>
         "#
@@ -87,9 +93,11 @@ pub(crate) fn send_measured_strong_increase_email(
     cur_measurement: &BigDecimal,
     prev_measurement: &BigDecimal,
     diff_measurement: &BigDecimal,
+    measure_time: &chrono::DateTime<Local>
 ) {
     let german_name = get_measure_type_name_german(measure_type);
     let german_unit = get_measure_type_unit_german(measure_type);
+    let measure_time_formatted = measure_time.format("%d.%m.%Y %H:%M:%S");
     let email_text = format!(
         r#"
         <!DOCTYPE html>
@@ -103,6 +111,7 @@ pub(crate) fn send_measured_strong_increase_email(
             <h1>{german_name} ist um {diff_measurement} {german_unit} gestiegen!</h1>
             <h1>Derzeitige(r) {german_name}: {cur_measurement} {german_unit}</h1>
             <h1>Vorherige(r) {german_name}: {prev_measurement} {german_unit}</h1>
+            <h1>Uhrzeit: {measure_time_formatted} </h1>
           </body>
         </html>
         "#
@@ -116,9 +125,11 @@ pub(crate) fn send_measured_strong_decrease_email(
     cur_measurement: &BigDecimal,
     prev_measurement: &BigDecimal,
     diff_measurement: &BigDecimal,
+    measure_time: &chrono::DateTime<Local>
 ) {
     let german_name = get_measure_type_name_german(measure_type);
     let german_unit = get_measure_type_unit_german(measure_type);
+    let measure_time_formatted = measure_time.format("%d.%m.%Y %H:%M:%S");
     let email_text = format!(
         r#"
         <!DOCTYPE html>
@@ -132,6 +143,7 @@ pub(crate) fn send_measured_strong_decrease_email(
             <h1>{german_name} ist um {diff_measurement} {german_unit} gesunken!</h1>
             <h1>Derzeitige(r) {german_name}: {cur_measurement} {german_unit}</h1>
             <h1>Vorherige(r) {german_name}: {prev_measurement} {german_unit}</h1>
+            <h1>Uhrzeit: {measure_time_formatted} </h1>
           </body>
         </html>
         "#
