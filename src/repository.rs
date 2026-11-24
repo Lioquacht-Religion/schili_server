@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use anyhow::{Result, anyhow};
 use chrono::{Local, NaiveDateTime, TimeDelta, Utc};
-use schili_api::api::{self, MeasureLimit, SensorType, SensorTypeWarnLimits};
+use schili_api::api::{self, MeasureLimit, SensorType, SensorTypeWarnLimits, SensorWithWarnLimitsAndDBId};
 use sqlx::{
     PgPool, Postgres, Row, postgres::{PgRow, PgValueRef, types::PgInterval}, prelude::FromRow, types::BigDecimal,
 };
@@ -20,7 +20,7 @@ pub struct Sensor {
 }
 
 pub struct SensorTypeWarnLimitsDAO{
-     sensor_type: SensorTypeDB,
+     pub sensor_type: SensorTypeDB,
      warn_high_num: Option<BigDecimal>,
      warn_high_timeout: Option<PgInterval>,
      warn_low_num: Option<BigDecimal>,
@@ -181,7 +181,6 @@ impl DBSimpleMeasurement for SimpleMeasurement {
     }
 }
 
-//TODO: replace current models with new generic one
 pub struct SensorMeasurement{
     pub sensor_measurement_id: i64,
     pub sensor_id: i32,
@@ -260,6 +259,90 @@ pub async fn insert_sensor(
 
     Ok(())
 }
+pub async fn insert_update_sensor_warnlimit(
+    pool: &PgPool,
+    sensor: &SensorWithWarnLimitsAndDBId,
+    warnlimit: &SensorTypeWarnLimitsDAO
+) -> anyhow::Result<i64>{
+    if let Some(_existing) = sensor.sensor_w_warn_limits
+        .sensor_type_warn_limits.get(&warnlimit.sensor_type.inner()){
+            update_sensor_warnlimit(pool, sensor, warnlimit).await
+    }
+    else{
+            insert_sensor_warnlimit(pool, sensor, warnlimit).await
+    }
+}
+
+pub async fn insert_sensor_warnlimit(
+    pool: &PgPool,
+    sensor: &SensorWithWarnLimitsAndDBId,
+    warnlimit: &SensorTypeWarnLimitsDAO
+) -> anyhow::Result<i64>{
+    sensor.sensor_id;
+    let warnlimit_id = sqlx::query_scalar!(
+        r#"
+           INSERT INTO sensor_types_link (
+                sensor_id, sensor_type, 
+                warn_high_num, warn_high_timeout,
+                warn_low_num, warn_low_timeout,
+                warn_increase_num, warn_increase_search_interval,
+                warn_decrease_num, warn_decrease_search_interval
+           ) VALUES (
+                $1,
+                $2, $3,
+                $4, $5,
+                $6, $7,
+                $8, $9,
+                $10
+           )
+           RETURNING sensor_types_link_id "#,
+        sensor.sensor_id,
+        warnlimit.sensor_type as _, 
+        warnlimit.warn_high_num, warnlimit.warn_high_timeout,
+        warnlimit.warn_low_num, warnlimit.warn_low_timeout,
+        warnlimit.warn_increase_num, warnlimit.warn_increase_search_interval,
+        warnlimit.warn_decrease_num, warnlimit.warn_decrease_search_interval
+    ).fetch_one(pool)
+    .await?;
+
+    Ok(warnlimit_id)
+}
+
+pub async fn update_sensor_warnlimit(
+    pool: &PgPool,
+    sensor: &SensorWithWarnLimitsAndDBId,
+    warnlimit: &SensorTypeWarnLimitsDAO
+) -> anyhow::Result<i64>{
+    sensor.sensor_id;
+    let warnlimit_id = sqlx::query_scalar!(
+        r#"
+           UPDATE sensor_types_link SET (
+                warn_high_num, warn_high_timeout,
+                warn_low_num, warn_low_timeout,
+                warn_increase_num, warn_increase_search_interval,
+                warn_decrease_num, warn_decrease_search_interval
+           ) = (
+                $1, $2,
+                $3, $4,
+                $5, $6, 
+                $7, $8
+           )
+           WHERE sensor_id = $9 AND sensor_type = $10
+           RETURNING sensor_types_link_id
+        "#,
+        warnlimit.warn_high_num, warnlimit.warn_high_timeout,
+        warnlimit.warn_low_num, warnlimit.warn_low_timeout,
+        warnlimit.warn_increase_num, warnlimit.warn_increase_search_interval,
+        warnlimit.warn_decrease_num, warnlimit.warn_decrease_search_interval,
+        sensor.sensor_id,
+        warnlimit.sensor_type as _
+    ).fetch_one(pool)
+    .await?;
+
+    Ok(warnlimit_id)
+}
+
+
 
 pub async fn insert_sensor_types(
     pool: &PgPool,

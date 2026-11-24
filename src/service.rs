@@ -33,6 +33,29 @@ pub async fn add_sensor(
     Ok(db_sensor)
 }
 
+pub async fn add_or_update_sensor_warnlimit(
+    pool: &Pool<Postgres>,
+    sensor_cache: SensorCache,
+    sensor_ref: &str,
+    api_warnlimit: &api::SensorTypeWarnLimits,
+) -> anyhow::Result<repository::SensorTypeWarnLimitsDAO> {
+    let sensor = sensor_cache.get_sensor_by_ref(pool, sensor_ref).await?;
+    let warn_limits= api_warnlimit.model_into();
+    repository::insert_update_sensor_warnlimit(&pool, &sensor, &warn_limits)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "{} warnlimits of sensor with reference='{}' could not be inserted or updated.",
+                    warn_limits.sensor_type.inner().to_str(),
+                    sensor_ref
+            )
+        })?;
+    sensor_cache.evict_sensor_by_ref(sensor_ref).await;
+    Ok(warn_limits)
+}
+
+
+
 pub async fn get_sensor(pool: &Pool<Postgres>, sensor_ref: &str) -> anyhow::Result<api::SensorWithTypes> {
     let db_sensor = repository::find_sensor_and_types_by_ref(&pool, sensor_ref)
         .await
@@ -405,18 +428,39 @@ pub async fn insert_bundled_measurements(
     sensor_cache: SensorCache,
     api_measurements: &mut api::SensorTypedSimpleMeasurements,
 ) -> anyhow::Result<(), Vec<anyhow::Error>> {
+    let mut errors: Vec<anyhow::Error> = Vec::new();
     let sensor_ref = &api_measurements.sensor_reference;
     let sensor = sensor_cache.get_sensor_by_ref(pool, sensor_ref).await.map_err(|e| vec![e])?;
+    let cur_datetime = &Local::now();
+    // check only most recent measurement for each sensor type against their warnlimits
+    for sensor_type in sensor.sensor_w_warn_limits.sensor_type_warn_limits.keys(){
+        if let Some(m) = api_measurements.measurements
+            .iter()
+            .filter(|st| st.sensor_type == *sensor_type)
+            .max_by_key(|st| st.measure.measure_time)
+        {
+            let warn_limits = sensor.sensor_w_warn_limits.sensor_type_warn_limits.get(&m.sensor_type);
+            if let Err(e) = check_warn_limits_and_send_emails(
+                pool, &sensor, warn_limits,
+                &m.measure.measurement, cur_datetime
+            ).await {
+                errors.push(e);
+            }
+        }
+    }
 
-    let mut errors: Vec<anyhow::Error> = Vec::new();
     for m in api_measurements.measurements.iter() {
-        let warn_limits = sensor.sensor_w_warn_limits.sensor_type_warn_limits.get(&m.sensor_type);
-        if let Err(e) = add_measurement_check_warn_limits(
-            pool, m.sensor_type, &sensor, warn_limits, &m.measure).await
+
+        let mut db_m = (m.sensor_type, &m.measure).model_into();
+
+        if let Err(e) = repository::insert_single_sensor_measurement(
+        pool, sensor.sensor_id, &mut db_m)
+        .await
         {
             errors.push(e);
         }
     }
+
     if errors.is_empty() {
         Ok(())
     } else {

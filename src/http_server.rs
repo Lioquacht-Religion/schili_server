@@ -4,10 +4,7 @@ use std::str::FromStr;
 
 use actix_cors::Cors;
 use actix_web::{
-    App, HttpServer, Responder, get, http,
-    middleware::Logger,
-    post,
-    web::{self, ThinData},
+    App, HttpServer, Responder, get, http, middleware::Logger, patch, post, web::{self, ThinData},
 };
 use anyhow::anyhow;
 use chrono::Local;
@@ -90,6 +87,24 @@ async fn post_sensor(
     ))
 }
 
+#[patch("/sensor/warnlimit/add/{sensor_ref}")]
+async fn patch_sensor_warn_limit(
+    ThinData(pool): web::ThinData<Pool<Postgres>>,
+    ThinData(sensor_cache): web::ThinData<SensorCache>,
+    path: web::Path<String>,
+    api_warnlimit: web::Json<api::SensorTypeWarnLimits>,
+) -> actix_web::Result<impl Responder, ApiError> {
+    let sensor_ref = path.into_inner();
+    let _db_sensor = service::add_or_update_sensor_warnlimit(
+        &pool, sensor_cache, &sensor_ref, &api_warnlimit).await?;
+
+    Ok(format!(
+        "Updated warn limits for sensorType='{}' of sensor with reference='{}'.",
+        api_warnlimit.get_sensor_type().to_str(),
+        sensor_ref
+    ))
+}
+
 #[get("/sensor/reference/{sensor_ref}")]
 async fn get_sensor(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
@@ -108,7 +123,7 @@ async fn get_all_sensors(
     Ok(web::Json(sensors))
 }
 
-#[actix_web::post("/sensor/filtered/{sensor_name_part}")]
+#[post("/sensor/filtered/{sensor_name_part}")]
 async fn get_all_sensors_filtered(
     ThinData(pool): web::ThinData<Pool<Postgres>>,
     path: web::Path<String>,

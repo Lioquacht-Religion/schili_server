@@ -53,4 +53,8 @@ impl SensorCache{
             .map_err(|_| anyhow!("Could not find sensor by reference='{}'.", sensor_ref))?;
          Ok(Arc::clone(sensor.value()))
     }
+
+    pub async fn evict_sensor_by_ref(&self, sensor_ref: &str){
+        self.cache.remove(sensor_ref).await;
+    }
 }
